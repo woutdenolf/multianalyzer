@@ -103,6 +103,11 @@ cdef class MultiAnalyzer:
             self._thd = thd * self.dr
         else:
             self._thd = 2.0 * self._tha
+        
+        assert len(psi) == self.NUM_CRYSTAL, "psi has the right size"
+        assert len(rollx) == self.NUM_CRYSTAL, "rollx has the right size"
+        assert len(rolly) == self.NUM_CRYSTAL, "rolly has the right size"
+        
         self._psi = numpy.ascontiguousarray(psi, dtype=numpy.float64) * self.dr
         self._rollx = numpy.ascontiguousarray(rollx, dtype=numpy.float64) * self.dr
         self._rolly = numpy.ascontiguousarray(rolly, dtype=numpy.float64) * self.dr
@@ -268,15 +273,15 @@ cdef class MultiAnalyzer:
                   double tth_min, 
                   double tth_max, 
                   double dtth, 
-                  double phi_max):
+                  double phi_max=90):
         """Performess the integration of the ROIstack recorded at given angles on t
         
         :param roi_stack: stack of (nframes,NUM_CRYSTAL*numROI) with the recorded signal
         :param arm: 2theta position of the arm (in degrees)
-        :param tth_min: start position of the histograms
-        :param tth_max: End positon of the histogram
-        :param dtth: bin size for the histogram
-        :param phi_max: discard data with |phi| larger than this value
+        :param tth_min: start position of the histograms (in degrees)
+        :param tth_max: End positon of the histogram (in degrees)
+        :param dtth: bin size for the histogram (in degrees)
+        :param phi_max: discard data with |phi| larger than this value (in degree)
         :return: center of bins, histogram of signal and histogram of normalization
         """
         cdef:
@@ -287,9 +292,12 @@ cdef class MultiAnalyzer:
             int32_t[:, :, ::1] roicoll = numpy.ascontiguousarray(roicollection, dtype=numpy.int32).reshape((nframes, self.NUM_CRYSTAL, -1))
 
         niter = 100
-        tth_b = numpy.arange(tth_min, tth_max+dtth, dtth)
+        if (tth_max-tth_min)%dtth > (dtth/2.0):
+            tth_b = numpy.arange(tth_min, tth_max+1.5*dtth, dtth)
+        else:
+            tth_b = numpy.arange(tth_min, tth_max+0.5*dtth, dtth)
         tth_min -= dtth/2.
-        tth_max += dtth/2
+        tth_max += dtth/2.
         nbin = tth_b.size
         norm_b = numpy.zeros((self.NUM_CRYSTAL, nbin), dtype=numpy.float64)
         signal_b = numpy.zeros((self.NUM_CRYSTAL, nbin), dtype=numpy.int64)

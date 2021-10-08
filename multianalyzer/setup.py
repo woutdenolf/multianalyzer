@@ -24,7 +24,7 @@
 
 __authors__ = ["V. Valls"]
 __license__ = "MIT"
-__date__ = "12/05/2020"
+__date__ = "08/10/2021"
 
 from numpy.distutils.misc_util import Configuration
 import platform
@@ -63,20 +63,20 @@ def create_extension_config(name, extra_sources=None, can_use_openmp=False):
 
 
 def configuration(parent_package='', top_path=None):
-    config = Configuration('freesas', parent_package, top_path)
+    config = Configuration('multianalyzer', parent_package, top_path)
 
     ext_modules = [
-        create_extension_config("_distance", can_use_openmp=True),
-        create_extension_config("_cormap", can_use_openmp=False),
-        create_extension_config("_autorg", can_use_openmp=False),
-        create_extension_config("_bift", can_use_openmp=False),
+        create_extension_config("_multianalyzer", can_use_openmp=True),
+        # create_extension_config("_cormap", can_use_openmp=False),
+        # create_extension_config("_autorg", can_use_openmp=False),
+        # create_extension_config("_bift", can_use_openmp=False),
     ]
 
     for ext_config in ext_modules:
         config.add_extension(**ext_config)
 
-    config.add_subpackage('test')
-    config.add_subpackage('app')
+    # config.add_subpackage('test')
+    # config.add_subpackage('app')
 
     return config
 

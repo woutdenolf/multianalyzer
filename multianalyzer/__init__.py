@@ -23,3 +23,5 @@ except ImportError:
         "Do NOT use %s from its sources: build it and use the built version"
         % project
     )
+from ._multianalyzer import MultiAnalyzer
+from .file_io import ID22_bliss_parser, topas_parser
