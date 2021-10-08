@@ -292,10 +292,7 @@ cdef class MultiAnalyzer:
             int32_t[:, :, ::1] roicoll = numpy.ascontiguousarray(roicollection, dtype=numpy.int32).reshape((nframes, self.NUM_CRYSTAL, -1))
 
         niter = 100
-        if (tth_max-tth_min)%dtth > (dtth/2.0):
-            tth_b = numpy.arange(tth_min, tth_max+1.5*dtth, dtth)
-        else:
-            tth_b = numpy.arange(tth_min, tth_max+0.5*dtth, dtth)
+        tth_b = numpy.arange(tth_min, tth_max+0.5*dtth, dtth)
         tth_min -= dtth/2.
         tth_max += dtth/2.
         nbin = tth_b.size
