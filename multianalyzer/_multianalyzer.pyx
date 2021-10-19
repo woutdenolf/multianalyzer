@@ -4,7 +4,7 @@
 ##cython: linetrace=True
 
 __author__ = "Jérôme KIEFFER"
-__date__  = "08/10/2021"
+__date__  = "19/10/2021"
 __copyright__ = "2021, ESRF, France"
 __licence__ = "MIT"
 
@@ -32,7 +32,7 @@ cdef class MultiAnalyzer:
     
     def __cinit__(self, L, L2, pixel, center, tha, thd, psi, rollx, rolly):
         "Performes the initialization of the data"
-        self.NUM_CRYSTAL = 13
+        self.NUM_CRYSTAL = len(center)
         self.dr = pi/180.
         self._center = numpy.empty(self.NUM_CRYSTAL, dtype=numpy.float64) # position of the center, par analyzer
         self._psi = numpy.empty(self.NUM_CRYSTAL, dtype=numpy.float64)    # Analyzer position on 2th arm
@@ -124,10 +124,12 @@ cdef class MultiAnalyzer:
     def calc_Ln(self):
         "Implementation of the Eq24"
         return (self.L/self.sin_tha)*(numpy.sin(self._psi) - numpy.sin(numpy.asarray(self._psi)-self._tha))
+        #return self.L*(tan(self._tha/2.0)*numpy.sin(self._psi) + numpy.cos(self._psi))
     
     def calc_Lp(self):
         "Variation on Eq26"
         return self._Ln * (numpy.asarray(self.cos_rx) - numpy.asarray(self.sin_rx)*self.sin_ry*self.cot_tha)
+        # return numpy.asarray(self._Ln) * (numpy.asarray(self.cos_rx)*self.sin_tha - numpy.asarray(self.sin_rx)*numpy.asarray(self.sin_ry)*self.cos_tha) / self.sin_tha
     
     cdef double _calc_zd(self, int idr, int ida) nogil:
         """Calculate the distance to the center along z
@@ -199,6 +201,11 @@ cdef class MultiAnalyzer:
         den = cos_arm_d*(cos_tth         + 2.0 * sin_tha*(sin_arm_a_n*cos_rx        + cos_arm_a_n*sin_rx*sin_ry))\
             + sin_arm_d*(sin_tth*cos_phi + 2.0 * sin_tha*(sin_arm_a_n*sin_rx*sin_ry - cos_arm_a_n*cos_rx))
         return num/den
+    
+        # num = self._Lp[ida]*(cos_arm_d*cos_tth + sin_arm_d*sin_tth*cos_phi) - self.L*self.cos_thd - self.L2
+        # den = -cos_arm_d*(  cos_tth       + 2.0 * sin_tha*(sin_arm_a_n*cos_rx        + cos_arm_a_n*sin_rx*sin_ry))\
+        #       -sin_arm_d*(sin_tth*cos_phi + 2.0 * sin_tha*(sin_arm_a_n*sin_rx*sin_ry - cos_arm_a_n*cos_rx))
+        # return num/den
 
     cdef double _calc_tth(self, int ida, double arm, double phi) nogil:
         """Calculate the 2th from Eq 31: 
@@ -273,7 +280,12 @@ cdef class MultiAnalyzer:
                   double tth_min, 
                   double tth_max, 
                   double dtth, 
-                  double phi_max=90):
+                  double phi_max=90,
+                  int roi_min=0,
+                  int roi_max=1024,
+                  int roi_step=1,
+                  int iter_max=100,
+                  double resolution=1e-3):
         """Performess the integration of the ROIstack recorded at given angles on t
         
         :param roi_stack: stack of (nframes,NUM_CRYSTAL*numROI) with the recorded signal
@@ -282,44 +294,55 @@ cdef class MultiAnalyzer:
         :param tth_max: End positon of the histogram (in degrees)
         :param dtth: bin size for the histogram (in degrees)
         :param phi_max: discard data with |phi| larger than this value (in degree)
+        :param roi_min: first ROI to be considered
+        :param roi_max: Last ROI to be considered (excluded)
+        :param roi_step: consider ROIs stepwise
+        :param iter_max: maximum number of iteration in the 2theta convergence
+        :param resolution: precision of the 2theta convergence in fraction of dtth  
         :return: center of bins, histogram of signal and histogram of normalization
         """
         cdef:
-            int nbin, nroi, frame, ida, idr, value, niter, idx, nframes = arm.shape[0]
+            int nbin, nroi, idx_roi, frame, ida, idr, value, idx, nframes = arm.shape[0]
             double[:, ::1] norm_b
             int64_t[:, ::1] signal_b
-            double a, tth, nrm, resolution
+            double a, tth, nrm
             int32_t[:, :, ::1] roicoll = numpy.ascontiguousarray(roicollection, dtype=numpy.int32).reshape((nframes, self.NUM_CRYSTAL, -1))
 
-        niter = 100
         tth_b = numpy.arange(tth_min, tth_max+0.5*dtth, dtth)
         tth_min -= dtth/2.
         tth_max += dtth/2.
         nbin = tth_b.size
         norm_b = numpy.zeros((self.NUM_CRYSTAL, nbin), dtype=numpy.float64)
         signal_b = numpy.zeros((self.NUM_CRYSTAL, nbin), dtype=numpy.int64)
-        assert mon.shape[0] == arm.shape[0], "mon shape matches arm"        
-        nroi = roicoll.shape[2]
-        resolution = 0.001*self.dr*dtth
+        assert mon.shape[0] == arm.shape[0], "monitor array shape matches the one from arm array "        
+               
+        roi_min, roi_max = min(roi_min, roi_max), max(roi_min, roi_max)
+        roi_min = max(roi_min, 0)
+        roi_max = min(roi_max, roicoll.shape[2])
+        # this is a work-around to https://github.com/cython/cython/issues/1106
+        roi_step = abs(roi_step)
+        nroi = (roi_max-roi_min) / roi_step
+        
         #switch to radians:
-#         print(nframes, self.NUM_CRYSTAL, nroi)
         phi_max *= self.dr
         tth_min *= self.dr
         tth_max *= self.dr
         dtth *= self.dr
+        resolution *= dtth
         with nogil:
             for ida in prange(self.NUM_CRYSTAL, schedule="dynamic"):
                 for frame in range(nframes):
                     a = arm[frame]*self.dr
                     nrm = mon[frame]
+                    idx_roi = roi_min - roi_step
                     for idr in range(nroi):
-                        value = roicoll[frame, ida, idr]
-                        tth = self._refine(idr, ida, a, resolution, niter, phi_max)
+                        idx_roi = idx_roi + roi_step
+                        value = roicoll[frame, ida, idx_roi]
+                        if value>65530:
+                            continue
+                        tth = self._refine(idx_roi, ida, a, resolution, iter_max, phi_max)
                         if (tth>=tth_min) and (tth<tth_max):
                             idx = <int>floor((tth - tth_min)/dtth)
-#                             if (idx>=nbin):
-#                                 with gil:
-#                                     print(idx, tth, (tth - tth_min)/dtth)
                             norm_b[ida, idx] = norm_b[ida, idx] + nrm
                             signal_b[ida, idx] = signal_b[ida, idx] + value
         return numpy.asarray(tth_b), numpy.asarray(signal_b), numpy.asarray(norm_b)
