@@ -4,7 +4,7 @@
 ##cython: linetrace=True
 
 __author__ = "Jérôme KIEFFER"
-__date__  = "19/10/2021"
+__date__  = "07/12/2021"
 __copyright__ = "2021, ESRF, France"
 __licence__ = "MIT"
 
@@ -26,9 +26,9 @@ cdef class MultiAnalyzer:
     """
     cdef:
         public int NUM_CRYSTAL
-        public double dr
-        public double L, L2, pixel, _tha, _thd, sin_tha, cot_tha, cos_thd
-        public double[::1] _center, _rollx, _rolly, _psi, cos_rx, sin_rx, cos_ry, sin_ry, _Lp, _Ln
+        public float64_t dr
+        public float64_t L, L2, pixel, _tha, _thd, sin_tha, cot_tha, cos_thd
+        public float64_t[::1] _center, _rollx, _rolly, _psi, cos_rx, sin_rx, cos_ry, sin_ry, _Lp, _Ln
     
     def __cinit__(self, L, L2, pixel, center, tha, thd, psi, rollx, rolly):
         "Performes the initialization of the data"
@@ -275,17 +275,17 @@ cdef class MultiAnalyzer:
     
     def integrate(self,
                   roicollection, 
-                  double[::1] arm, 
-                  double[::1] mon, 
-                  double tth_min, 
-                  double tth_max, 
-                  double dtth, 
-                  double phi_max=90,
+                  float64_t[::1] arm, 
+                  float64_t[::1] mon, 
+                  float64_t tth_min, 
+                  float64_t tth_max, 
+                  float64_t dtth, 
+                  float64_t phi_max=90,
                   int roi_min=0,
                   int roi_max=1024,
                   int roi_step=1,
                   int iter_max=100,
-                  double resolution=1e-3):
+                  float64_t resolution=1e-3):
         """Performess the integration of the ROIstack recorded at given angles on t
         
         :param roi_stack: stack of (nframes,NUM_CRYSTAL*numROI) with the recorded signal
@@ -303,7 +303,7 @@ cdef class MultiAnalyzer:
         """
         cdef:
             int nbin, nroi, idx_roi, frame, ida, idr, value, idx, nframes = arm.shape[0]
-            double[:, ::1] norm_b
+            float64_t[:, ::1] norm_b
             int64_t[:, ::1] signal_b
             double a, tth, nrm
             int32_t[:, :, ::1] roicoll = numpy.ascontiguousarray(roicollection, dtype=numpy.int32).reshape((nframes, self.NUM_CRYSTAL, -1))

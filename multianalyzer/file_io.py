@@ -1,6 +1,6 @@
 __authors__ = ["Jérôme Kieffer"]
 __license__ = "MIT"
-__date__ = "08/10/2021"
+__date__ = "07/12/2021"
 
 import numpy
 import h5py
@@ -67,4 +67,5 @@ def ID22_bliss_parser(infile, entry=None):
         res["tha"] = entry["instrument/positioners/manom"][()]
         res["thd"] = entry["instrument/positioners/mantth"][()]
     return res
+
 

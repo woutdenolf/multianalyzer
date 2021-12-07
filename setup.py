@@ -26,7 +26,7 @@
 
 __copyright__ = "European Synchrotron Radiation Facility, Grenoble, France"
 __authors__ = ["Jérôme Kieffer", "Thomas Vincent"]
-__date__ = "08/10/2021"
+__date__ = "07/12/2021"
 __license__ = "MIT"
 
 import sys
@@ -889,7 +889,7 @@ def get_project_configuration(dry_run):
         "numpy%s" % numpy_requested_version,
         # for the script launcher
         "setuptools",
-        "h5py"
+        "h5py",
         "hdf5plugin"
     ]
 
@@ -914,7 +914,7 @@ def get_project_configuration(dry_run):
     }
 
     console_scripts = [
-        # "free_gpa = freesas.app.auto_gpa:main",
+        "id22rebin = multianalyzer.app.rebin:main",
         # "free_guinier = freesas.app.auto_guinier:main",
         # "free_rg = freesas.app.autorg:main",
         # "cormapy = freesas.app.cormap:main",
@@ -928,6 +928,7 @@ def get_project_configuration(dry_run):
     if platform.system() != "Windows":
         console_scripts.extend(
             [
+                "id22rebin.py = multianalyzer.app.rebin:main",
                 # "auto_gpa.py = freesas.app.auto_gpa:main",
                 # "auto_guinier.py = freesas.app.auto_guinier:main",
                 # "autorg.py = freesas.app.autorg:main",
@@ -938,7 +939,7 @@ def get_project_configuration(dry_run):
         )
 
     entry_points = {
-        # "console_scripts": console_scripts,
+        "console_scripts": console_scripts,
         # 'gui_scripts': [],
     }
 
