@@ -35,6 +35,7 @@ __copyright__ = "European Synchrotron Radiation Facility, Grenoble, France"
 __date__ = "07/12/2021"
 __status__ = "development"
 
+from argparse import ArgumentParser
 import logging
 try:
     logging.basicConfig(level=logging.WARNING, force=True)
@@ -53,24 +54,27 @@ try:
 except ImportError:
     logger.debug("No socket opened for debugging. Please install rfoo")
 
-from .. import version
+
 from .._multianalyzer import MultiAnalyzer
 from ..file_io import topas_parser, ID22_bliss_parser, Nexus
 
 
 def main():
-    from argparse import ArgumentParser
+    
     description = """Rebin ROI-collection into useable powder diffraction patterns.
     """
     epilog = """ This software is MIT licenced and availanle from https://github.com/kif/multianalyzer"""
     usage = """id22rebin [options] ROIcol.h5"""
-    version = "pyFAI benchmark version " + version
+    
+    from .._version import version
+    print(version)
+    version = f"id22rebin version {version}" 
     parser = ArgumentParser(usage=usage, description=description, epilog=epilog)
     required = parser.add_argument_group('Required arguments')
     required.add_argument("-p", "--pars", metavar='FILE', type=str,
                           help="Topas refinement file", required=True)
     required.add_argument("args", metavar='FILE', type=str, nargs='1',
-                        help="HDF5 file with ROI-collection", required=True)
+                        help="HDF5 file with ROI-collection")
     parser = parser.add_argument_group('Optionnal arguments')
     parser.add_argument("-v", "--version", action='version', version=version)
     parser.add_argument("-d", "--debug",
