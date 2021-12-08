@@ -4,7 +4,7 @@
 ##cython: linetrace=True
 
 __author__ = "Jérôme KIEFFER"
-__date__  = "07/12/2021"
+__date__  = "08/12/2021"
 __copyright__ = "2021, ESRF, France"
 __licence__ = "MIT"
 
@@ -304,16 +304,16 @@ cdef class MultiAnalyzer:
         cdef:
             int nbin, nroi, idx_roi, frame, ida, idr, value, idx, nframes = arm.shape[0]
             float64_t[:, ::1] norm_b
-            int64_t[:, ::1] signal_b
+            float64_t[:, ::1] signal_b
             double a, tth, nrm
             int32_t[:, :, ::1] roicoll = numpy.ascontiguousarray(roicollection, dtype=numpy.int32).reshape((nframes, self.NUM_CRYSTAL, -1))
 
-        tth_b = numpy.arange(tth_min, tth_max+0.5*dtth, dtth)
-        tth_min -= dtth/2.
-        tth_max += dtth/2.
+        tth_max += 0.5 * dtth
+        tth_b = numpy.arange(tth_min, tth_max + 0.4999999 * dtth, dtth)
+        tth_min -= 0.5 * dtth
         nbin = tth_b.size
         norm_b = numpy.zeros((self.NUM_CRYSTAL, nbin), dtype=numpy.float64)
-        signal_b = numpy.zeros((self.NUM_CRYSTAL, nbin), dtype=numpy.int64)
+        signal_b = numpy.zeros((self.NUM_CRYSTAL, nbin), dtype=numpy.float64)
         assert mon.shape[0] == arm.shape[0], "monitor array shape matches the one from arm array "        
                
         roi_min, roi_max = min(roi_min, roi_max), max(roi_min, roi_max)
@@ -321,7 +321,7 @@ cdef class MultiAnalyzer:
         roi_max = min(roi_max, roicoll.shape[2])
         # this is a work-around to https://github.com/cython/cython/issues/1106
         roi_step = abs(roi_step)
-        nroi = (roi_max-roi_min) / roi_step
+        nroi = (roi_max-roi_min) // roi_step
         
         #switch to radians:
         phi_max *= self.dr
@@ -344,5 +344,5 @@ cdef class MultiAnalyzer:
                         if (tth>=tth_min) and (tth<tth_max):
                             idx = <int>floor((tth - tth_min)/dtth)
                             norm_b[ida, idx] = norm_b[ida, idx] + nrm
-                            signal_b[ida, idx] = signal_b[ida, idx] + value
+                            signal_b[ida, idx] = signal_b[ida, idx] + <float64_t> value
         return numpy.asarray(tth_b), numpy.asarray(signal_b), numpy.asarray(norm_b)
