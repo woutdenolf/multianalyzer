@@ -1,6 +1,6 @@
 __authors__ = ["Jérôme Kieffer"]
 __license__ = "MIT"
-__date__ = "07/12/2021"
+__date__ = "08/12/2021"
 
 import os
 import sys
@@ -417,4 +417,41 @@ class Nexus(object):
             else:
                 dec = raw
         return dec
+
+
+def save_rebin(filename, beamline="id22", name="id22rebin", topas=None, res=None):
+    """Save rebinned data with external links to input data
+    
+    :param filename:
+    :param beamline:
+    :param name: program name
+    :param topas: dict with topas configuration
+    :param res: 3-tuple with results
+    """
+    with  Nexus(filename, mode="w", creator=name) as nxs:
+        entry = nxs.new_entry(entry="entry", program_name=name,
+                              title=None, force_time=None, force_name=False)
+        process_grp = nxs.new_class(entry, "id22rebin", class_type="NXprocess")
+        process_grp["program"] = name
+        process_grp["sequence_index"] = 1
+        process_grp["version"] = version
+        process_grp["date"] = get_isotime()
+        process_grp.create_dataset("argv", data=numpy.array(sys.argv, h5py.string_dtype("utf8"))).attrs["help"] = "Command line arguments"
+        process_grp.create_dataset("cwd", data=os.getcwd()).attrs["help"] = "Working directory"
+
+        if topas:
+            topas_grp = nxs.new_class(process_grp, "topas")
+            for k, v in topas.items():
+                topas_grp[k] = v
+
+        if res:
+            data_grp = nxs.new_class(process_grp, "data", "NXdata")
+            data_grp["2th"] = res[0]
+            data_grp["I_sum"] = res[1]
+            data_grp["norm"] = res[2]
+            data_grp["I"] = res[1] / res[2]
+            data_grp.attrs["signal"] = "I"
+            data_grp["I"].attrs["axes"] = [".", "2th"]
+            data_grp["I"].attrs["interpretation"] = "spectrum"
+            entry.attrs["default"] = data_grp.name
 
