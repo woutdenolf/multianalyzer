@@ -32,17 +32,21 @@ __author__ = "Jérôme Kieffer"
 __contact__ = "Jerome.Kieffer@ESRF.eu"
 __license__ = "MIT"
 __copyright__ = "European Synchrotron Radiation Facility, Grenoble, France"
-__date__ = "07/12/2021"
+__date__ = "08/12/2021"
 __status__ = "development"
 
+import os
 from argparse import ArgumentParser
 import logging
+import time
 try:
     logging.basicConfig(level=logging.WARNING, force=True)
 except ValueError:
     logging.basicConfig(level=logging.WARNING)
 logging.captureWarnings(True)
 logger = logging.getLogger(__name__)
+import json
+import numpy
 try:
     import hdf5plugin  # noqa
 except ImportError:
@@ -54,57 +58,113 @@ try:
 except ImportError:
     logger.debug("No socket opened for debugging. Please install rfoo")
 
-
+from .. import _version
 from .._multianalyzer import MultiAnalyzer
-from ..file_io import topas_parser, ID22_bliss_parser, Nexus
+from ..file_io import topas_parser, ID22_bliss_parser, save_rebin
 
 
-def main():
-    
+def parse():
+    name = "id22rebin"
     description = """Rebin ROI-collection into useable powder diffraction patterns.
     """
-    epilog = """ This software is MIT licenced and availanle from https://github.com/kif/multianalyzer"""
-    usage = """id22rebin [options] ROIcol.h5"""
-    
-    from .._version import version
-    print(version)
-    version = f"id22rebin version {version}" 
+    epilog = """This software is MIT-licenced and available from https://github.com/kif/multianalyzer"""
+    usage = f"{name} [options] ROIcol.h5"
+
+    version = f"{name} version {_version.version}"
     parser = ArgumentParser(usage=usage, description=description, epilog=epilog)
     required = parser.add_argument_group('Required arguments')
-    required.add_argument("-p", "--pars", metavar='FILE', type=str,
-                          help="Topas refinement file", required=True)
-    required.add_argument("args", metavar='FILE', type=str, nargs='1',
+    required.add_argument("args", metavar='FILE', type=str, nargs=1,
                         help="HDF5 file with ROI-collection")
-    parser = parser.add_argument_group('Optionnal arguments')
-    parser.add_argument("-v", "--version", action='version', version=version)
-    parser.add_argument("-d", "--debug",
+    required.add_argument("-p", "--pars", metavar='FILE', type=str,
+                          help="`topas` refinement file", required=True)
+
+    subparser = parser.add_argument_group('Rebinning options')
+    subparser.add_argument("-s", "--step", type=float, default=None,
+                           help="Step size of the 2θ scale. Default: the step size of the scan of the arm")
+    subparser.add_argument("-r", "--range", type=float, default=None, nargs=2,
+                           help="2θ range in degree. Default: the scan of the arm + analyzer amplitude")
+
+    subparser = parser.add_argument_group('Optionnal arguments')
+    subparser.add_argument("-v", "--version", action='version', version=version)
+    subparser.add_argument("-d", "--debug",
                         action="store_true", dest="debug", default=False,
                         help="switch to verbose/debug mode")
-    parser.add_argument("-w", "--wavelength", type=float, default=None,
+    subparser.add_argument("-w", "--wavelength", type=float, default=None,
                         help="Wavelength of the incident beam (in Å). Default: use the one in `topas` file")
-    parser.add_argument("-e", "--energy", type=float, default=None,
-                        help="Energy of the incident beam (in keV)")
-
-    parser.add_argument("-e", "--energy", type=float, default=None,
-                        help="Energy of the incident beam (in keV)")
+    subparser.add_argument("-e", "--energy", type=float, default=None,
+                        help="Energy of the incident beam (in keV). Replaces wavelength")
+    subparser.add_argument("-o", "--output", type=str, default=None,
+                        help="Output filename (in HDF5)")
     options = parser.parse_args()
 
     if options.debug:
-        # pyFAI.logger.setLevel(logging.DEBUG)
-        pass
-    
-    #
-    # pyFAI.benchmark.run(number=options.number,
-    #                     repeat=options.repeat,
-    #                     memprof=options.memprof,
-    #                     max_size=options.size,
-    #                     do_1d=options.onedim,
-    #                     do_2d=options.twodim,
-    #                     devices=devices)
-    #
-    # if pyFAI.benchmark.pylab is not None:
-    #     pyFAI.benchmark.pylab.ion()
-    input("Enter to quit")
+        logger.setLevel(logging.DEBUG)
+        logging.root.setLevel(level=logging.DEBUG)
+    return options
+
+
+def rebin(options):
+    t_start = time.perf_counter()
+    print(f"Load topas refinement file: {options.pars}")
+    param = topas_parser(options.pars)
+    # print(json.dumps(param, indent=2))
+    # Ensure all units are consitent. Here lengths are in milimeters.
+    L = param["L1"]
+    L2 = param["L2"]
+    pixel = 75e-3
+
+    # Angles are all given in degrees
+    center = numpy.array(param["centre"])
+    psi = numpy.rad2deg(param["offset"])
+    rollx = numpy.rad2deg(param["rollx"])
+    rolly = numpy.rad2deg(param["rolly"])
+
+    # tha = hdf5_data["tha"]
+    # thd = hdf5_data["thd"]
+    tha = numpy.rad2deg(param["manom"])
+    thd = numpy.rad2deg(param["mantth"])
+
+    # Finally initialize the rebinning engine.
+    mma = MultiAnalyzer(L, L2, pixel, center, tha, thd, psi, rollx, rolly)
+    for infile in options.args:
+        print(f"Read ROI-collection from  HDF5 file: {infile}")
+        t_start_reading = time.perf_counter()
+        hdf5_data = ID22_bliss_parser(infile)
+        t_end_reading = time.perf_counter()
+        logger.info("HDF5 read time: %.3fs", t_end_reading - t_start_reading)
+
+        roicol = hdf5_data["roicol"]
+        arm = hdf5_data["arm"]
+        mon = hdf5_data["mon"]
+        dtth = options.step or (abs(numpy.median(arm[1:] - arm[:-1])))
+        if options.range:
+            tth_min = min(options.range)
+            tth_max = max(options.range)
+        else:
+            tth_min = arm.min() + psi.min()
+            tth_max = arm.max() + psi.max()
+        print(f"Rebin data from {infile}")
+        t_start_rebinning = time.perf_counter()
+        res = mma.integrate(roicol,
+                            arm,
+                            mon,
+                            tth_min, tth_max, dtth=dtth)
+        t_end_rebinning = time.perf_counter()
+        logger.info("Rebinning time: %.3fs", t_end_rebinning - t_start_rebinning)
+        numpy.savez("dump", res)
+        output = options.output or os.path.splitext(infile)[0] + "_rebin.h5"
+        print(f"Save to {output}")
+        t_start_saving = time.perf_counter()
+        save_rebin(output, beamline="id22", name="id22rebin", topas=param, res=res)
+        t_end_saving = time.perf_counter()
+        logger.info("HDF5 write time: %.3fs", t_end_saving - t_start_saving)
+    print(f"Total execution time: {time.perf_counter()-t_start}s")
+    return res
+
+
+def main():
+    options = parse()
+    res = rebin(options)
 
 
 if __name__ == "__main__":
