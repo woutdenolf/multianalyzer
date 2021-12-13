@@ -4,7 +4,7 @@
 ##cython: linetrace=True
 
 __author__ = "Jérôme KIEFFER"
-__date__  = "08/12/2021"
+__date__  = "13/12/2021"
 __copyright__ = "2021, ESRF, France"
 __licence__ = "MIT"
 
@@ -280,7 +280,7 @@ cdef class MultiAnalyzer:
                   float64_t tth_min, 
                   float64_t tth_max, 
                   float64_t dtth, 
-                  float64_t phi_max=90,
+                  float64_t phi_max=90.,
                   int roi_min=0,
                   int roi_max=1024,
                   int roi_step=1,

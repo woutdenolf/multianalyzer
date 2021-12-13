@@ -32,7 +32,7 @@ __author__ = "Jérôme Kieffer"
 __contact__ = "Jerome.Kieffer@ESRF.eu"
 __license__ = "MIT"
 __copyright__ = "European Synchrotron Radiation Facility, Grenoble, France"
-__date__ = "08/12/2021"
+__date__ = "13/12/2021"
 __status__ = "development"
 
 import os
@@ -83,7 +83,9 @@ def parse():
                            help="Step size of the 2θ scale. Default: the step size of the scan of the arm")
     subparser.add_argument("-r", "--range", type=float, default=None, nargs=2,
                            help="2θ range in degree. Default: the scan of the arm + analyzer amplitude")
-
+    subparser.add_argument("--phi", type=float, default=90,
+                           help="φ_max: Maximum opening angle in azimuthal direction in degrees. Default: 90°, i.e. no restrictions")
+    
     subparser = parser.add_argument_group('Optionnal arguments')
     subparser.add_argument("-v", "--version", action='version', version=version)
     subparser.add_argument("-d", "--debug",
@@ -148,7 +150,8 @@ def rebin(options):
         res = mma.integrate(roicol,
                             arm,
                             mon,
-                            tth_min, tth_max, dtth=dtth)
+                            tth_min, tth_max, dtth=dtth,
+                            phi_max=options.phi)
         t_end_rebinning = time.perf_counter()
         logger.info("Rebinning time: %.3fs", t_end_rebinning - t_start_rebinning)
         numpy.savez("dump", res)
