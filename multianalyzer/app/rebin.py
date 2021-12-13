@@ -72,6 +72,16 @@ def parse():
 
     version = f"{name} version {_version.version}"
     parser = ArgumentParser(usage=usage, description=description, epilog=epilog)
+    parser.add_argument("-v", "--version", action='version', version=version)
+    parser.add_argument("-d", "--debug",
+                        action="store_true", dest="debug", default=False,
+                        help="switch to verbose/debug mode")
+    parser.add_argument("-w", "--wavelength", type=float, default=None,
+                        help="Wavelength of the incident beam (in Å). Default: use the one in `topas` file")
+    parser.add_argument("-e", "--energy", type=float, default=None,
+                        help="Energy of the incident beam (in keV). Replaces wavelength")
+    parser.add_argument("-o", "--output", type=str, default=None,
+                        help="Output filename (in HDF5)")
     required = parser.add_argument_group('Required arguments')
     required.add_argument("args", metavar='FILE', type=str, nargs=1,
                         help="HDF5 file with ROI-collection")
@@ -84,19 +94,9 @@ def parse():
     subparser.add_argument("-r", "--range", type=float, default=None, nargs=2,
                            help="2θ range in degree. Default: the scan of the arm + analyzer amplitude")
     subparser.add_argument("--phi", type=float, default=90,
-                           help="φ_max: Maximum opening angle in azimuthal direction in degrees. Default: 90°, i.e. no restrictions")
+                           help="φ_max: Maximum opening angle in azimuthal direction in degrees. Default: 90°, i.e. no restriction")
     
-    subparser = parser.add_argument_group('Optionnal arguments')
-    subparser.add_argument("-v", "--version", action='version', version=version)
-    subparser.add_argument("-d", "--debug",
-                        action="store_true", dest="debug", default=False,
-                        help="switch to verbose/debug mode")
-    subparser.add_argument("-w", "--wavelength", type=float, default=None,
-                        help="Wavelength of the incident beam (in Å). Default: use the one in `topas` file")
-    subparser.add_argument("-e", "--energy", type=float, default=None,
-                        help="Energy of the incident beam (in keV). Replaces wavelength")
-    subparser.add_argument("-o", "--output", type=str, default=None,
-                        help="Output filename (in HDF5)")
+
     options = parser.parse_args()
 
     if options.debug:
