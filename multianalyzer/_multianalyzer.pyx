@@ -238,18 +238,29 @@ cdef class MultiAnalyzer:
         Y = (sin_arm_a*sin_rx*sin_ry - cos_arm_a*cos_rx) * cos_phi - sin_rx*cos_ry*sin_phi
         Z = -sin_tha
         
-        XZ = X*Z 
-        X2 = X*X
-        Z2 = Z*Z
-        Y2 = Y*Y
-        D2 = X2+Y2
-        D4 = sqrt(Y*Y*(D2-Z2))
-        G = Z-X2*Z/D2
-        S1 = atan2((XZ - D4)/D2, (G+X*sqrt(Y2*(D2-Z2)))/Y)
-        S2 = atan2((XZ + D4)/D2, (G-X*sqrt(Y2*(D2-Z2)))/Y)
-        
+        #XZ = X*Z 
+        #X2 = X*X
+        #Z2 = Z*Z
+        #Y2 = Y*Y
+        #D2 = X2+Y2
+        #D4 = sqrt(Y*Y*(D2-Z2))
+        #G = Z-X2*Z/D2
+        #S1 = atan2((XZ - D4)/D2, (G+X*sqrt(Y2*(D2-Z2)))/Y)
+        #S2 = atan2((XZ + D4)/D2, (G-X*sqrt(Y2*(D2-Z2)))/Y)
+        #return the solution closest to the arm position
+        #return S1 if fabs(arm_n-S1)<fabs(arm_n-S2) else S2
+        D = sqrt(X*X+Y*Y)
+        if Z > D:
+            C = 0.0
+        elif Z < -D:
+            C = pi
+        else:
+            C = acos(Z/D)
+        G = atan2(Y, X)
+        S1 = G + C
+        S2 = G - C
         return S1 if fabs(arm_n-S1)<fabs(arm_n-S2) else S2
-    
+
     cdef double _refine(self, int idr, int ida, 
                         double arm, double resolution=1e-8, int niter=100, 
                         double phi_max=pi) nogil:
