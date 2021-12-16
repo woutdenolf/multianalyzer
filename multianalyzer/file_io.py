@@ -459,8 +459,8 @@ def save_rebin(filename, beamline="id22", name="id22rebin", topas=None, res=None
             tth_ds.attrs["unit"] = "deg"
             data_grp.create_dataset("I_sum", data=res[1], **CMP)
             data_grp.create_dataset("norm", data=res[2], **CMP)
-            scale = numpy.median(res[2], axis=-1)
-            with numpy.errstate(divide='ignore'):
+            scale = numpy.atleast_2d(numpy.median(res[2], axis=-1)).T
+            with numpy.errstate(divide='ignore', invalid='ignore'):
                 I = scale * res[1] / res[2]
             I_ds = data_grp.create_dataset("I", data=I , **CMP)
             if topas:

@@ -8,9 +8,10 @@ __date__  = "13/12/2021"
 __copyright__ = "2021, ESRF, France"
 __licence__ = "MIT"
 
-from libc.math cimport pi, sin, cos, atan2, tan, asin, acos, sqrt, isnan, fabs, NAN, floor
+from libc.math cimport pi, sin, cos, atan2, tan, asin, acos, sqrt, isnan, fabs, NAN, floor, copysign
 from libc.stdint cimport int8_t, uint8_t, int16_t, uint16_t, \
                          int32_t, uint32_t, int64_t, uint64_t
+#from libc.stdio cimport printf
 ctypedef double float64_t
 ctypedef float float32_t
 from cython.parallel import prange
@@ -162,10 +163,12 @@ cdef class MultiAnalyzer:
             double sin_tha = self.sin_tha
             double sin_rx  = self.sin_rx[ida]
             double cos_ry  = self.sin_ry[ida]
-            double num, den
+            double num, den, ratio, res
         num = zd + 2.0*L3*sin_tha*sin_rx*cos_ry
         den = (Lp+L3)*sin(tth)
-        return asin(num/den)
+        ratio = num/den
+        res = asin(ratio) if fabs(ratio)<1.0 else copysign(0.5*pi, ratio)
+        return res
     
     cdef double _calc_L3(self, int ida, double arm, double tth, double phi) nogil:
         """Implementation Eq28.
@@ -230,12 +233,20 @@ cdef class MultiAnalyzer:
             double sin_arm_a = sin(arm_a_n)
             double sin_phi = sin(phi)
             double cos_phi = cos(phi)
-            double X, Y, Z
+            double X, Y, Z, C, D
         X = sin_arm_a*cos_rx + cos_arm_a*sin_rx*sin_ry
         Y = (sin_arm_a*sin_rx*sin_ry - cos_arm_a*cos_rx) * cos_phi - sin_rx*cos_ry*sin_phi
         Z = -sin_tha
         # Nota technically this should be +/- 
-        return atan2(Y, X) + acos(Z/sqrt(X*X+Y*Y))
+        D = sqrt(X*X+Y*Y)
+        if Z > D:
+            C = 0.0
+        elif Z < -D:
+            C = pi
+        else:
+            C = acos(Z/D)
+        return atan2(Y, X) + C
+        #return 2.0*atan2(Y - sqrt( X*X + Y*Y - Z*Z), X + Z)
     
     cdef double _refine(self, int idr, int ida, 
                         double arm, double resolution=1e-8, int niter=100, 
@@ -263,6 +274,8 @@ cdef class MultiAnalyzer:
                 tth = NAN
             else:
                 break
+        #if tth != tth:
+        #    printf("tth is NAN at idr %d ida %d phi %f zd %f\n", idr, ida, phi, zd)
         if fabs(phi) > phi_max:
             tth = NAN
         return tth

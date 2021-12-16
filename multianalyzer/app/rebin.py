@@ -94,7 +94,13 @@ def parse():
                            help="2θ range in degree. Default: the scan of the arm + analyzer amplitude")
     subparser.add_argument("--phi", type=float, default=90,
                            help="φ_max: Maximum opening angle in azimuthal direction in degrees. Default: 90°, i.e. no restriction")
-    
+    subparser.add_argument("--iter", type=int, default=100,
+                           help="Maximum number of iteration for the 2theta convergence loop, default:100")
+    subparser.add_argument("--startp", type=int, default=0,
+                           help="Starting pixel on the detector, default:0")
+    subparser.add_argument("--endp", type=int, default=1024,
+                           help="End pixel on the detector to be considered, default:1024")
+
 
     options = parser.parse_args()
 
@@ -149,6 +155,9 @@ def rebin(options):
                             arm,
                             mon,
                             tth_min, tth_max, dtth=dtth,
+                            iter_max=options.iter,
+                            roi_min=options.startp,
+                            roi_max=options.endp,
                             phi_max=options.phi)
         t_end_rebinning = time.perf_counter()
         logger.info("Rebinning time: %.3fs", t_end_rebinning - t_start_rebinning)
