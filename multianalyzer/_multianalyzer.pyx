@@ -4,7 +4,7 @@
 ##cython: linetrace=True
 
 __author__ = "Jérôme KIEFFER"
-__date__  = "13/12/2021"
+__date__  = "16/12/2021"
 __copyright__ = "2021, ESRF, France"
 __licence__ = "MIT"
 
@@ -227,26 +227,28 @@ cdef class MultiAnalyzer:
             double sin_rx = self.sin_rx[ida]
             double sin_ry = self.sin_ry[ida]
             double cos_ry = self.cos_ry[ida]
-            
-            double arm_a_n = arm +self._psi[ida] - self._tha
+            double arm_n = arm + self._psi[ida]
+            double arm_a_n = arm_n - self._tha
             double cos_arm_a = cos(arm_a_n)
             double sin_arm_a = sin(arm_a_n)
             double sin_phi = sin(phi)
             double cos_phi = cos(phi)
-            double X, Y, Z, C, D
+            double X, Y, Z, C, D, D2, XZ, S1, S2, S,S4, Z2, Y2, G
         X = sin_arm_a*cos_rx + cos_arm_a*sin_rx*sin_ry
         Y = (sin_arm_a*sin_rx*sin_ry - cos_arm_a*cos_rx) * cos_phi - sin_rx*cos_ry*sin_phi
         Z = -sin_tha
-        # Nota technically this should be +/- 
-        D = sqrt(X*X+Y*Y)
-        if Z > D:
-            C = 0.0
-        elif Z < -D:
-            C = pi
-        else:
-            C = acos(Z/D)
-        return atan2(Y, X) + C
-        #return 2.0*atan2(Y - sqrt( X*X + Y*Y - Z*Z), X + Z)
+        
+        XZ = X*Z 
+        X2 = X*X
+        Z2 = Z*Z
+        Y2 = Y*Y
+        D2 = X2+Y2
+        D4 = sqrt(Y*Y*(D2-Z2))
+        G = Z-X2*Z/D2
+        S1 = atan2((XZ - D4)/D2, (G+X*sqrt(Y2*(D2-Z2)))/Y)
+        S2 = atan2((XZ + D4)/D2, (G-X*sqrt(Y2*(D2-Z2)))/Y)
+        
+        return S1 if fabs(arm_n-S1)<fabs(arm_n-S2) else S2
     
     cdef double _refine(self, int idr, int ida, 
                         double arm, double resolution=1e-8, int niter=100, 
