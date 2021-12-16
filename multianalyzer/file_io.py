@@ -1,6 +1,6 @@
 __authors__ = ["Jérôme Kieffer"]
 __license__ = "MIT"
-__date__ = "08/12/2021"
+__date__ = "16/12/2021"
 
 import os
 import sys
@@ -18,6 +18,15 @@ else:
         h5py._errors.silence_errors()
     except AttributeError:  # old h5py
         pass
+try:
+    import hdf5plugin
+except ImportError:
+    CMP = {"chunks":True,
+           "compression": "gzip",
+           "compression_opts":1}
+else:
+    CMP = hdf5plugin.Bitshuffle()
+
 from . import version
 
 
@@ -446,12 +455,13 @@ def save_rebin(filename, beamline="id22", name="id22rebin", topas=None, res=None
 
         if res:
             data_grp = nxs.new_class(process_grp, "data", "NXdata")
-            data_grp["2th"] = res[0]
-            data_grp["I_sum"] = res[1]
-            data_grp["norm"] = res[2]
-            data_grp["I"] = res[1] / res[2]
+            data_grp.create_dataset("2th", data=res[0], **CMP)
+            data_grp.create_dataset("I_sum", data=res[1], **CMP)
+            data_grp.create_dataset("norm", data=res[2], **CMP)
+            with numpy.errstate(divide='ignore'):
+                I_ds = data_grp.create_dataset("I", data=res[1] / res[2], **CMP)
+            I_ds.attrs["axes"] = [".", "2th"]
+            I_ds.attrs["interpretation"] = "spectrum"
             data_grp.attrs["signal"] = "I"
-            data_grp["I"].attrs["axes"] = [".", "2th"]
-            data_grp["I"].attrs["interpretation"] = "spectrum"
             entry.attrs["default"] = data_grp.name
 
