@@ -451,16 +451,24 @@ def save_rebin(filename, beamline="id22", name="id22rebin", topas=None, res=None
         if topas:
             topas_grp = nxs.new_class(process_grp, "topas")
             for k, v in topas.items():
-                topas_grp[k] = v
+                topas_grp.create_dataset(k, data=v).attrs["unit"] = "rad"
 
         if res:
             data_grp = nxs.new_class(process_grp, "data", "NXdata")
-            data_grp.create_dataset("2th", data=res[0], **CMP)
+            tth_ds = data_grp.create_dataset("2th", data=res[0], **CMP)
+            tth_ds.attrs["unit"] = "deg"
             data_grp.create_dataset("I_sum", data=res[1], **CMP)
             data_grp.create_dataset("norm", data=res[2], **CMP)
+            scale = numpy.median(res[2], axis=-1)
             with numpy.errstate(divide='ignore'):
-                I_ds = data_grp.create_dataset("I", data=res[1] / res[2], **CMP)
-            I_ds.attrs["axes"] = [".", "2th"]
+                I = scale * res[1] / res[2]
+            I_ds = data_grp.create_dataset("I", data=I , **CMP)
+            if topas:
+                I_ds.attrs["axes"] = ["offset", "2th"]
+                offset_ds = data_grp.create_dataset("offset", data=numpy.rad2deg(topas["offset"]))
+                offset_ds.attrs["unit"] = "deg"
+            else:
+                I_ds.attrs["axes"] = [".", "2th"]
             I_ds.attrs["interpretation"] = "spectrum"
             data_grp.attrs["signal"] = "I"
             entry.attrs["default"] = data_grp.name

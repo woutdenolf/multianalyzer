@@ -32,7 +32,7 @@ __author__ = "Jérôme Kieffer"
 __contact__ = "Jerome.Kieffer@ESRF.eu"
 __license__ = "MIT"
 __copyright__ = "European Synchrotron Radiation Facility, Grenoble, France"
-__date__ = "13/12/2021"
+__date__ = "16/12/2021"
 __status__ = "development"
 
 import os
@@ -45,7 +45,6 @@ except ValueError:
     logging.basicConfig(level=logging.WARNING)
 logging.captureWarnings(True)
 logger = logging.getLogger(__name__)
-import json
 import numpy
 try:
     import hdf5plugin  # noqa
@@ -109,7 +108,6 @@ def rebin(options):
     t_start = time.perf_counter()
     print(f"Load topas refinement file: {options.pars}")
     param = topas_parser(options.pars)
-    # print(json.dumps(param, indent=2))
     # Ensure all units are consitent. Here lengths are in milimeters.
     L = param["L1"]
     L2 = param["L2"]
