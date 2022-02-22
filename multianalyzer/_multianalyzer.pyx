@@ -4,7 +4,7 @@
 ##cython: linetrace=True
 
 __author__ = "Jérôme KIEFFER"
-__date__  = "16/12/2021"
+__date__  = "22/02/2022"
 __copyright__ = "2021, ESRF, France"
 __licence__ = "MIT"
 
@@ -233,22 +233,40 @@ cdef class MultiAnalyzer:
             double sin_arm_a = sin(arm_a_n)
             double sin_phi = sin(phi)
             double cos_phi = cos(phi)
-            double X, Y, Z, C, D, D2, XZ, S1, S2, S,S4, Z2, Y2, G
+            double X, Y, Z, X2, Y2, Z2, D, D2, S1, S2, S
+            
+        # Solve `X cos(2th) + Y sin (2th) = Z` for 2th real 
         X = sin_arm_a*cos_rx + cos_arm_a*sin_rx*sin_ry
         Y = (sin_arm_a*sin_rx*sin_ry - cos_arm_a*cos_rx) * cos_phi - sin_rx*cos_ry*sin_phi
         Z = -sin_tha
         
-        #XZ = X*Z 
-        #X2 = X*X
-        #Z2 = Z*Z
-        #Y2 = Y*Y
-        #D2 = X2+Y2
-        #D4 = sqrt(Y*Y*(D2-Z2))
-        #G = Z-X2*Z/D2
-        #S1 = atan2((XZ - D4)/D2, (G+X*sqrt(Y2*(D2-Z2)))/Y)
-        #S2 = atan2((XZ + D4)/D2, (G-X*sqrt(Y2*(D2-Z2)))/Y)
-        #return the solution closest to the arm position
-        #return S1 if fabs(arm_n-S1)<fabs(arm_n-S2) else S2
+        Y2 = Y*Y
+        X2 = X*X
+        D2 = X2 + Y2
+        Z2 = Z*Z
+        #Solution from mathematica:
+        #cdef double C, XZ, Z2, G
+        # XZ = X*Z 
+        # X2 = X*X
+        # Z2 = Z*Z
+        # Y2 = Y*Y
+        # D2 = X2+Y2
+        # D4 = sqrt(Y2*(D2-Z2))
+        # G = Z*Y2 
+        # S1 = atan2(XZ - D4, G + X*sqrt(Y2*(D2-Z2))/Y)
+        # S2 = atan2(XZ + D4, G - X*sqrt(Y2*(D2-Z2))/Y)
+        
+        # Solution from wolfram alpha:
+        # cdef double D3, XpZ = X+Z
+        # if XpZ:
+        #     D3 = sqrt(D2 - Z2)
+        #     S1 = 2.0 * atan2(Y - D3, XpZ)
+        #     S2 = 2.0 * atan2(Y + D3, XpZ)
+        # else:
+        #     S1 = pi
+        #     S2 = -2.0*atan2(X, Y)
+        
+        #Solution from cos(a-b) = cos(a)cos(b)-sin(a)sin(b) 
         D = sqrt(X*X+Y*Y)
         if Z > D:
             C = 0.0
@@ -259,7 +277,10 @@ cdef class MultiAnalyzer:
         G = atan2(Y, X)
         S1 = G + C
         S2 = G - C
-        return S1 if fabs(arm_n-S1)<fabs(arm_n-S2) else S2
+        
+        #return the solution closest to the arm position
+        S = S1 if fabs(arm_n-S1)<fabs(arm_n-S2) else S2
+        return S
 
     cdef double _refine(self, int idr, int ida, 
                         double arm, double resolution=1e-8, int niter=100, 
@@ -274,10 +295,17 @@ cdef class MultiAnalyzer:
         cdef:
             int i
             double zd, phi, tth_old, tth, L3
-            
+
+            double arm_n = arm + self._psi[ida]
+            double arm_a_n = arm_n - self._tha
+            # double cos_arm_a = cos(arm_a_n)
+            # double sin_arm_a = sin(arm_a_n)
+            #TODO: propagate cos_arm_a, sin_arm_a in _calc_tth and _calc_L3
+
         zd = self._calc_zd(idr, ida)
-        phi = self._init_phi(zd, arm) 
+        phi = self._init_phi(zd, arm_n) 
         tth_old = self._calc_tth(ida, arm, phi)
+        
         for i in range(niter):
             L3 = self._calc_L3(ida, arm, tth_old, phi)
             phi = self._calc_phi(ida, zd, L3, tth_old)
