@@ -32,7 +32,7 @@ __author__ = "Jérôme Kieffer"
 __contact__ = "Jerome.Kieffer@ESRF.eu"
 __license__ = "MIT"
 __copyright__ = "European Synchrotron Radiation Facility, Grenoble, France"
-__date__ = "16/12/2021"
+__date__ = "23/02/2022"
 __status__ = "development"
 
 import os
@@ -59,7 +59,7 @@ except ImportError:
 
 from .. import _version
 from .._multianalyzer import MultiAnalyzer
-from ..file_io import topas_parser, ID22_bliss_parser, save_rebin
+from ..file_io import topas_parser, ID22_bliss_parser, save_rebin, get_isotime
 
 
 def parse():
@@ -94,13 +94,12 @@ def parse():
                            help="2θ range in degree. Default: the scan of the arm + analyzer amplitude")
     subparser.add_argument("--phi", type=float, default=90,
                            help="φ_max: Maximum opening angle in azimuthal direction in degrees. Default: 90°, i.e. no restriction")
-    subparser.add_argument("--iter", type=int, default=100,
+    subparser.add_argument("--iter", type=int, default=250,
                            help="Maximum number of iteration for the 2theta convergence loop, default:100")
     subparser.add_argument("--startp", type=int, default=0,
                            help="Starting pixel on the detector, default:0")
     subparser.add_argument("--endp", type=int, default=1024,
                            help="End pixel on the detector to be considered, default:1024")
-
 
     options = parser.parse_args()
 
@@ -111,6 +110,7 @@ def parse():
 
 
 def rebin(options):
+    start_time = get_isotime()
     t_start = time.perf_counter()
     print(f"Load topas refinement file: {options.pars}")
     param = topas_parser(options.pars)
@@ -165,7 +165,7 @@ def rebin(options):
         output = options.output or os.path.splitext(infile)[0] + "_rebin.h5"
         print(f"Save to {output}")
         t_start_saving = time.perf_counter()
-        save_rebin(output, beamline="id22", name="id22rebin", topas=param, res=res)
+        save_rebin(output, beamline="id22", name="id22rebin", topas=param, res=res, start_time=start_time)
         t_end_saving = time.perf_counter()
         logger.info("HDF5 write time: %.3fs", t_end_saving - t_start_saving)
     print(f"Total execution time: {time.perf_counter()-t_start}s")

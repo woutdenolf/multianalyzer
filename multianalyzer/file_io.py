@@ -1,6 +1,6 @@
 __authors__ = ["Jérôme Kieffer"]
 __license__ = "MIT"
-__date__ = "16/12/2021"
+__date__ = "23/02/2022"
 
 import os
 import sys
@@ -428,18 +428,18 @@ class Nexus(object):
         return dec
 
 
-def save_rebin(filename, beamline="id22", name="id22rebin", topas=None, res=None):
+def save_rebin(filename, beamline="id22", name="id22rebin", topas=None, res=None, start_time=None):
     """Save rebinned data with external links to input data
     
     :param filename:
     :param beamline:
     :param name: program name
     :param topas: dict with topas configuration
-    :param res: 3-tuple with results
+    :param res: 3/4-tuple with results
     """
     with  Nexus(filename, mode="w", creator=name) as nxs:
         entry = nxs.new_entry(entry="entry", program_name=name,
-                              title=None, force_time=None, force_name=False)
+                              title=None, force_time=start_time, force_name=False)
         process_grp = nxs.new_class(entry, "id22rebin", class_type="NXprocess")
         process_grp["program"] = name
         process_grp["sequence_index"] = 1
@@ -457,8 +457,10 @@ def save_rebin(filename, beamline="id22", name="id22rebin", topas=None, res=None
             data_grp = nxs.new_class(process_grp, "data", "NXdata")
             tth_ds = data_grp.create_dataset("2th", data=res[0], **CMP)
             tth_ds.attrs["unit"] = "deg"
-            data_grp.create_dataset("I_sum", data=res[1], **CMP)
-            data_grp.create_dataset("norm", data=res[2], **CMP)
+            sum_ds = data_grp.create_dataset("I_sum", data=res[1], **CMP)
+            sum_ds.attrs["interpretation"] = "spectrum"
+            norm_ds = data_grp.create_dataset("norm", data=res[2], **CMP)
+            norm_ds.attrs["interpretation"] = "spectrum"
             scale = numpy.atleast_2d(numpy.median(res[2], axis=-1)).T
             with numpy.errstate(divide='ignore', invalid='ignore'):
                 I = scale * res[1] / res[2]
@@ -472,4 +474,7 @@ def save_rebin(filename, beamline="id22", name="id22rebin", topas=None, res=None
             I_ds.attrs["interpretation"] = "spectrum"
             data_grp.attrs["signal"] = "I"
             entry.attrs["default"] = data_grp.name
+            if len(res) >= 4:
+                debug_ds = data_grp.create_dataset("cycles", data=res[3] , **CMP)
+                debug_ds.attrs["interpretation"] = "image"
 
