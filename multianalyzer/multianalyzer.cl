@@ -18,8 +18,8 @@
 //}
 
 kernel void memset(
-                int num_crystal,
-                int num_bin,
+                uint num_crystal,
+                uint num_bin,
                 global int *out_signal,
                 global int *out_norm                
                 ){
