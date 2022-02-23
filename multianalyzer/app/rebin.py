@@ -59,6 +59,10 @@ except ImportError:
 
 from .. import _version
 from .._multianalyzer import MultiAnalyzer
+try:
+    from ..opencl import OclMultiAnalyzer
+except ImportError:
+    OclMultiAnalyzer = None
 from ..file_io import topas_parser, ID22_bliss_parser, save_rebin, get_isotime
 
 
@@ -101,6 +105,10 @@ def parse():
     subparser.add_argument("--endp", type=int, default=1024,
                            help="End pixel on the detector to be considered, default:1024")
 
+    subparser = parser.add_argument_group('OpenCL options')
+    subparser.add_argument("--device", type=str, default=None,
+                           help="Use specified OpenCL device, comma separated (by default: Cython implementation)")
+
     options = parser.parse_args()
 
     if options.debug:
@@ -131,7 +139,10 @@ def rebin(options):
     thd = numpy.rad2deg(param["mantth"])
 
     # Finally initialize the rebinning engine.
-    mma = MultiAnalyzer(L, L2, pixel, center, tha, thd, psi, rollx, rolly)
+    if options.device and OclMultiAnalyzer:
+        mma = OclMultiAnalyzer(L, L2, pixel, center, tha, thd, psi, rollx, rolly, device=options.device.split(","))
+    else:
+        mma = MultiAnalyzer(L, L2, pixel, center, tha, thd, psi, rollx, rolly)
     for infile in options.args:
         print(f"Read ROI-collection from  HDF5 file: {infile}")
         t_start_reading = time.perf_counter()
