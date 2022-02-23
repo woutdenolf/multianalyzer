@@ -26,7 +26,7 @@
 
 __copyright__ = "European Synchrotron Radiation Facility, Grenoble, France"
 __authors__ = ["Jérôme Kieffer", "Thomas Vincent"]
-__date__ = "07/12/2021"
+__date__ = "23/02/2022"
 __license__ = "MIT"
 
 import sys
@@ -895,7 +895,7 @@ def get_project_configuration(dry_run):
 
     setup_requires = ["setuptools", "numpy", "cython"]
 
-    package_data = {
+    package_data = { '': ['multianalyzer/*.cl']
         # Resources files for silx
         # 'silx.resources': [
         #    'gui/logo/*.png',
@@ -979,6 +979,7 @@ def get_project_configuration(dry_run):
         install_requires=install_requires,
         setup_requires=setup_requires,
         cmdclass=cmdclass,
+        include_package_data=True,
         package_data=package_data,
         zip_safe=False,
         entry_points=entry_points,
