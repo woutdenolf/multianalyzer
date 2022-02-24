@@ -1,37 +1,3 @@
-//#ifdef cl_khr_int64_base_atomics
-//#pragma OPENCL EXTENSION cl_khr_int64_base_atomics: enable
-//
-//
-//inline void atomic_add_global_double(volatile global double *addr, double val)
-//{
-//   union {
-//       unsigned long  u64;
-//       double f64;
-//   } next, expected, current;
-//   current.f64    = *addr;
-//   do {
-//       expected.f64 = current.f64;
-//       next.f64     = expected.f64 + val;
-//       current.u64  = atom_cmpxchg( (volatile global unsigned long *)addr,
-//                                      expected.u64, next.u64);
-//   } while( current.u64 != expected.u64 );
-//}
-
-kernel void memset(
-                uint num_crystal,
-                uint num_bin,
-                global int *out_signal,
-                global int *out_norm                
-                ){
-    int ida = get_global_id(1);
-    int bin = get_global_id(0);
-    if ((ida<num_crystal) && (bin<num_bin)){
-        int pos = ida*num_bin + bin;
-        out_signal[pos] = 0;
-        out_norm[pos] = 0;
-    }
-}
-
 
 /*
  * Set of function to calculate tth !
