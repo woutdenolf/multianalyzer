@@ -1,6 +1,6 @@
 __authors__ = ["Jérôme Kieffer"]
 __license__ = "MIT"
-__date__ = "23/02/2022"
+__date__ = "24/02/2022"
 
 import os
 import sys
@@ -477,4 +477,5 @@ def save_rebin(filename, beamline="id22", name="id22rebin", topas=None, res=None
             if len(res) >= 4:
                 debug_ds = data_grp.create_dataset("cycles", data=res[3] , **CMP)
                 debug_ds.attrs["interpretation"] = "image"
+                debug_ds.attrs["info"] = "Number of refinement cycle to converge 2theta"
 

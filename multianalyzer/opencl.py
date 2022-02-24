@@ -1,7 +1,6 @@
 import os
 import logging
 logger = logging.getLogger(__name__)
-import time
 from collections import OrderedDict
 import numpy
 import pyopencl
@@ -51,7 +50,7 @@ class OclMultiAnalyzer:
             self.ctx = pyopencl.create_some_context(answers=[str(i) for i in device])
         else:
             self.ctx = pyopencl.create_some_context(interactive=True)
-        print(self.ctx.devices[0])
+        
         self.queue = pyopencl.CommandQueue(self.ctx)
         self.kernel_arguments = OrderedDict()
         self.buffers = {}
@@ -65,18 +64,14 @@ class OclMultiAnalyzer:
         self.buffers["roicoll"] = None
         self.buffers["monitor"] = None
         self.buffers["arm"] = None
-        self.buffers["center"] = cla.to_device(self.queue, self._psi)
-        self.buffers["psi"] = cla.to_device(self.queue, self._center)
+        self.buffers["center"] = cla.to_device(self.queue, self._center)
+        self.buffers["psi"] = cla.to_device(self.queue, self._psi)
         self.buffers["rollx"] = cla.to_device(self.queue, self._rollx)
         self.buffers["rolly"] = cla.to_device(self.queue, self._rolly)
         self.buffers["out_signal"] = None
         self.buffers["out_norm"] = None
 
     def set_kernel_arguments(self):
-        self.kernel_arguments["memset"] = OrderedDict([("num_crystal", self.NUM_CRYSTAL),
-                                                       ("num_bin", None),
-                                                       ("out_signal", self.buffers["out_signal"]),
-                                                       ("out_norm", self.buffers["out_norm"])])
         self.kernel_arguments["integrate"] = OrderedDict([("roicoll", self.buffers["roicoll"]),
                                                           ("monitor", self.buffers["monitor"]),
                                                           ("arm", self.buffers["arm"]),
@@ -96,11 +91,15 @@ class OclMultiAnalyzer:
                                                           ("resolution", None),
                                                           ("niter", 250),
                                                           ("phi_max", None),
+                                                          ("roi_min", None),
+                                                          ("roi_max", None),
                                                           ("tth_min", None),
                                                           ('tth_max', None),
                                                           ("dtth", None),
                                                           ("out_signal", self.buffers["out_signal"]),
-                                                          ("out_norm", self.buffers["out_norm"])])
+                                                          ("out_norm", self.buffers["out_norm"]),
+                                                          ("do_debug", numpy.uint8(0)),
+                                                          ("cycles", None)])
 
     def compile_kernel(self):
         with open(os.path.join(os.path.dirname(__file__), "multianalyzer.cl"), "r") as r:
@@ -115,9 +114,9 @@ class OclMultiAnalyzer:
                   tth_max,
                   dtth,
                   phi_max=90.,
-                  roi_min=None,
-                  roi_max=None,
-                  roi_step=None,
+                  roi_min=0,
+                  roi_max=512,
+                  roi_step=1,
                   iter_max=250,
                   resolution=1e-3):
         """Performess the integration of the ROIstack recorded at given angles on t
@@ -132,8 +131,10 @@ class OclMultiAnalyzer:
         :param resolution: precision of the 2theta convergence in fraction of dtth  
         :return: center of bins, histogram of signal and histogram of normalization, cycles per data-point
         """
-        if roi_min or roi_max or roi_step:
-            logger.warning("roi_min, roi_max and roi_step are not supported in OpenCL")
+        
+        if roi_step and roi_step!=1:
+            logger.warning("only roi_step=1 is supported in OpenCL")
+        do_debug = logger.getEffectiveLevel()<=logging.DEBUG
         nframes = arm.shape[0]
         roicoll = numpy.ascontiguousarray(roicollection, dtype=numpy.int32).reshape((nframes, self.NUM_CRYSTAL, -1))
         mon = numpy.ascontiguousarray(mon, dtype=numpy.int32)
@@ -141,19 +142,20 @@ class OclMultiAnalyzer:
         tth_b = numpy.arange(tth_min, tth_max + 0.4999999 * dtth, dtth)
         tth_min -= 0.5 * dtth
         nbin = tth_b.size
-        norm_b = numpy.zeros((self.NUM_CRYSTAL, nbin), dtype=numpy.int32)
-        signal_b = numpy.zeros((self.NUM_CRYSTAL, nbin), dtype=numpy.int32)
         assert mon.shape[0] == arm.shape[0], "monitor array shape matches the one from arm array "
-
         nroi = roicoll.shape[-1]
-
         # self.cycles = numpy.zeros((self.NUM_CRYSTAL, nroi, nframes), dtype=numpy.uint8)
 
+        logger.info(f"Allocate `roicoll` on device for {roicoll.nbytes/1e6}MB")
         self.buffers["roicoll"] = cla.to_device(self.queue, roicoll)
+        logger.info(f"Allocate `mon` on device for {mon.nbytes/1e6}MB")
         self.buffers["monitor"] = cla.to_device(self.queue, mon)
+        logger.info(f"Allocate `arm` on device for {arm.nbytes/1e6}MB")
         self.buffers["arm"] = cla.to_device(self.queue, numpy.deg2rad(arm))
-        self.buffers["out_norm"] = cla.to_device(self.queue, norm_b)
-        self.buffers["out_signal"] = cla.to_device(self.queue, signal_b)
+        logger.info(f"Allocate `out_norm` on device for {4*self.NUM_CRYSTAL* nbin/1e6}MB")
+        self.buffers["out_norm"] = cla.zeros(self.queue, (self.NUM_CRYSTAL, nbin), dtype=numpy.int32)
+        logger.info(f"Allocate `out_signal` on device for {4*self.NUM_CRYSTAL* nbin/1e6}MB")
+        self.buffers["out_signal"] = cla.zeros(self.queue, (self.NUM_CRYSTAL, nbin), dtype=numpy.int32)
         kwags = self.kernel_arguments["integrate"]
         kwags["roicoll"] = self.buffers["roicoll"].data
         kwags["monitor"] = self.buffers["monitor"].data
@@ -163,15 +165,32 @@ class OclMultiAnalyzer:
         kwags["num_frame"] = numpy.uint32(nframes)
         kwags["num_roi"] = numpy.uint32(nroi)
         kwags["num_bin"] = numpy.uint32(nbin)
-        kwags["resolution"] = numpy.deg2rad(resolution)
+        kwags["resolution"] = numpy.deg2rad(resolution*dtth)
         kwags["niter"] = numpy.int32(iter_max)
         kwags["phi_max"] = numpy.deg2rad(phi_max)
         kwags["tth_min"] = numpy.deg2rad(tth_min)
         kwags['tth_max'] = numpy.deg2rad(tth_max)
         kwags["dtth"] = numpy.deg2rad(dtth)
-
-        t0 = time.perf_counter()
+        kwags["roi_min"] = numpy.uint32(max(roi_min, 0))
+        kwags["roi_max"] = numpy.uint32(min(roi_max, nroi))
+        if do_debug:
+            logger.info(f"Allocate `cycles` on device for {self.NUM_CRYSTAL*nroi*nframes/1e6}MB")
+            self.buffers["cycles"] = cla.zeros(self.queue, (self.NUM_CRYSTAL, nroi, nframes), dtype=numpy.uint8)
+        else:
+            self.buffers["cycles"] = cla.zeros(self.queue, (1, 1, 1), dtype=numpy.uint8)
+        kwags["do_debug"] = numpy.int32(do_debug)
+        kwags["cycles"] = self.buffers["cycles"].data
+            
+        if do_debug:
+            log = ["Parameters of the `integrate` kernel:"]
+            i=0
+            for k,v in kwags.items():
+                i+=1
+                log.append(f"#{i}\t{k}: {v}")
+            logger.debug("\n".join(log))
         evt = self.prg.integrate(self.queue, (nroi, nframes, self.NUM_CRYSTAL), (nroi, 1, 1), *kwags.values())
         evt.wait()
-        print(time.perf_counter() - t0)
-        return numpy.asarray(tth_b), self.buffers["out_signal"].get(), self.buffers["out_norm"].get()
+        if do_debug:
+            return tth_b, self.buffers["out_signal"].get(), self.buffers["out_norm"].get(), self.buffers["cycles"].get() 
+        else:
+            return tth_b, self.buffers["out_signal"].get(), self.buffers["out_norm"].get()

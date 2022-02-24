@@ -4,7 +4,7 @@
 ##cython: linetrace=True
 
 __author__ = "Jérôme KIEFFER"
-__date__  = "23/02/2022"
+__date__  = "24/02/2022"
 __copyright__ = "2021, ESRF, France"
 __licence__ = "MIT"
 
@@ -476,13 +476,13 @@ cdef class MultiAnalyzer:
         
         if idf>=0:
             if i+1 == niter:
-                i = 252
+                i = 251
             elif not isfinite(L3):
-                i = 253
+                i = 252
             elif not isfinite(sin_phi):
-                i = 254
+                i = 253
             elif not isfinite(tth):
-                i = 255
+                i = 254
             self.cycles[ida, idr, idf] += i 
 
         if (phi_max<pi) and (fabs(asin(sin_phi)) > phi_max):

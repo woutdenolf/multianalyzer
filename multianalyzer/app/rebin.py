@@ -32,7 +32,7 @@ __author__ = "Jérôme Kieffer"
 __contact__ = "Jerome.Kieffer@ESRF.eu"
 __license__ = "MIT"
 __copyright__ = "European Synchrotron Radiation Facility, Grenoble, France"
-__date__ = "23/02/2022"
+__date__ = "24/02/2022"
 __status__ = "development"
 
 import os
@@ -141,8 +141,10 @@ def rebin(options):
     # Finally initialize the rebinning engine.
     if options.device and OclMultiAnalyzer:
         mma = OclMultiAnalyzer(L, L2, pixel, center, tha, thd, psi, rollx, rolly, device=options.device.split(","))
+        print(f"Using device {mma.ctx.devices[0]}")
     else:
         mma = MultiAnalyzer(L, L2, pixel, center, tha, thd, psi, rollx, rolly)
+        print("Using Cython+OpenMP")
     for infile in options.args:
         print(f"Read ROI-collection from  HDF5 file: {infile}")
         t_start_reading = time.perf_counter()
@@ -179,13 +181,13 @@ def rebin(options):
         save_rebin(output, beamline="id22", name="id22rebin", topas=param, res=res, start_time=start_time)
         t_end_saving = time.perf_counter()
         logger.info("HDF5 write time: %.3fs", t_end_saving - t_start_saving)
-    print(f"Total execution time: {time.perf_counter()-t_start}s")
+    print(f"Total execution time: {time.perf_counter()-t_start:.3f}s (of which read:{t_end_reading - t_start_reading:.3f}s regrid:{t_end_rebinning - t_start_rebinning:.3f} write:{t_end_saving - t_start_saving:.3f}s)")
     return res
 
 
 def main():
     options = parse()
-    res = rebin(options)
+    rebin(options)
 
 
 if __name__ == "__main__":
