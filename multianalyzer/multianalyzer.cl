@@ -202,34 +202,50 @@ kernel void  integrate(
         double tth_min,
         double tth_max,
         double dtth,
+        int width, //in number of pixels
         global int *out_signal,
         global int *out_norm,
         int do_debug,
-        global uchar *cycles        
+        global uchar *cycles,
+        local double *cache
         ){
     
     size_t idr = get_global_id(0);
     size_t idf = get_global_id(1);
     size_t ida = get_global_id(2);
     
-    if ((idr>=num_roi) || (idf>=num_frame) || (ida>=num_roi) ) {
-        return;
-    }
-    
     int c;
-    double tth;
+    double tth = NAN;
     
-    if ((idr>=roi_min) && (idr<roi_max)){   
-        double2 tth2 = refine_tth(L, L2, pixel, d_arm, center, tha, thd, psi, rollx, rolly, resolution, niter, phi_max);
-        tth = tth2.s0;
-        c = (int)tth2.s1;
+    cache[idr] = tth;
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    uchar active_thread = ((idr<num_roi) || (idf<num_frame) || (ida<num_roi) );
+    if (active_thread){    
+        if ((idr>=roi_min) && (idr<roi_max)){   
+            double2 tth2 = refine_tth(L, L2, pixel, d_arm, center, tha, thd, psi, rollx, rolly, resolution, niter, phi_max);
+            tth = tth2.s0;
+            c = (int)tth2.s1;
+        }
+        else{
+            c = 255;
+        }
     }
-    else{
-        c = 255;
+    cache[idr] = tth;
+    barrier(CLK_LOCAL_MEM_FENCE);
+    if (width){
+        int other = ((idr>center[ida]))?(idr - width):(idr + width);
+        double delta = fabs(cache[other]-tth);
+//        if ((idf==1) && (idr==1)){
+//            printf("here %d %6.4f there %d %6.4f %.6f\n",idr, tth, other, cache[other], delta);
+//        }
+        if (!(delta<dtth)){
+            active_thread = 0;
+            c = 250;
+            tth = NAN;
+        }
     }
-    
-            
-    if ((tth>=tth_min) && (tth<tth_max)){
+    if (active_thread && (tth>=tth_min) && (tth<tth_max)){
         int nrm = monitor[idf];
         int value = roicoll[idf*num_roi*num_crystal + ida*num_roi + idr];
         int idx = convert_int_rtn((tth - tth_min)/dtth);

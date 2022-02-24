@@ -8,6 +8,8 @@ __date__  = "24/02/2022"
 __copyright__ = "2021, ESRF, France"
 __licence__ = "MIT"
 
+import logging
+logger = logging.getLogger(__name__)
 from libc.math cimport pi, sin, cos, atan2, atan, tan, asin, acos, sqrt, isnan, fabs, NAN, floor, copysign, fmin, fmax, isfinite
                        
 from libc.stdint cimport int8_t, uint8_t, int16_t, uint16_t, \
@@ -163,14 +165,15 @@ cdef class MultiAnalyzer:
         :return: an approximation of the sine of azimuthal angle phi.
         """
         cdef: 
-            double L, tan_phi, tan2_phi
+            double L, tan_phi #, tan2_phi
         if sin_tth == 0.0:
             return 0.0
         else:
             L = self.L + self.L2
             tan_phi = zd / (L*fabs(sin_tth))
-            tan2_phi = tan_phi * tan_phi 
-            return copysign(sqrt(tan2_phi/(1.0+tan2_phi)), zd) 
+            return fmin(0.95, fmax(tan_phi, -.95))
+            # tan2_phi = tan_phi * tan_phi 
+            # return copysign(sqrt(tan2_phi/(1.0+tan2_phi)), zd) 
 
     cdef double _calc_phi(self, int ida, double zd, double L3, double tth) nogil:
         """Implementation of Eq29 
@@ -508,7 +511,8 @@ cdef class MultiAnalyzer:
                   int roi_max=1024,
                   int roi_step=1,
                   int iter_max=250,
-                  float64_t resolution=1e-3):
+                  float64_t resolution=1e-3,
+                  width=0):
         """Performess the integration of the ROIstack recorded at given angles on t
         
         :param roi_stack: stack of (nframes,NUM_CRYSTAL*numROI) with the recorded signal
@@ -521,7 +525,8 @@ cdef class MultiAnalyzer:
         :param roi_max: Last ROI to be considered (excluded)
         :param roi_step: consider ROIs stepwise
         :param iter_max: maximum number of iteration in the 2theta convergence
-        :param resolution: precision of the 2theta convergence in fraction of dtth  
+        :param resolution: precision of the 2theta convergence in fraction of dtth
+        :param width: unsupported for now, only works on OpenCL  
         :return: center of bins, histogram of signal and histogram of normalization, cycles per data-point
         """
         cdef:
@@ -531,7 +536,8 @@ cdef class MultiAnalyzer:
             double a, tth, nrm
             int32_t[:, :, ::1] roicoll = numpy.ascontiguousarray(roicollection, dtype=numpy.int32).reshape((nframes, self.NUM_CRYSTAL, -1))
         
-        
+        if width:
+            logger.warning("Width parameter is not supported in Cython implementation")
         tth_max += 0.5 * dtth
         tth_b = numpy.arange(tth_min, tth_max + 0.4999999 * dtth, dtth)
         tth_min -= 0.5 * dtth
