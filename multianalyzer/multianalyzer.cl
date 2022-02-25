@@ -101,7 +101,7 @@ double2 refine_tth(
         global double *rolly,
         double resolution, 
         int niter, 
-        double phi_max)
+        double sin_phi_max)
 {
     size_t idr = get_global_id(0);
     size_t idf = get_global_id(1);
@@ -163,6 +163,10 @@ double2 refine_tth(
     }
     if (i+1 == niter)
         i = 251;
+    else if (fabs(sin_phi) >= sin_phi_max){
+        tth = NAN;
+        i = 250;
+        }
     else if (! isfinite(L3))
         i = 252;
     else if (! isfinite(sin_phi))

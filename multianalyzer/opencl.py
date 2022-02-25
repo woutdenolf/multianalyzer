@@ -96,10 +96,12 @@ class OclMultiAnalyzer:
                                                           ("tth_min", None),
                                                           ('tth_max', None),
                                                           ("dtth", None),
+                                                          ("width", numpy.int32(0)),
                                                           ("out_signal", self.buffers["out_signal"]),
                                                           ("out_norm", self.buffers["out_norm"]),
                                                           ("do_debug", numpy.uint8(0)),
-                                                          ("cycles", None)])
+                                                          ("cycles", None),
+                                                          ("local", None)])
 
     def compile_kernel(self):
         with open(os.path.join(os.path.dirname(__file__), "multianalyzer.cl"), "r") as r:
@@ -118,7 +120,9 @@ class OclMultiAnalyzer:
                   roi_max=512,
                   roi_step=1,
                   iter_max=250,
-                  resolution=1e-3):
+                  resolution=1e-3,
+                  width=1
+                  ):
         """Performess the integration of the ROIstack recorded at given angles on t
         
         :param roi_stack: stack of (nframes,NUM_CRYSTAL*numROI) with the recorded signal
@@ -128,7 +132,8 @@ class OclMultiAnalyzer:
         :param dtth: bin size for the histogram (in degrees)
         :param phi_max: discard data with |phi| larger than this value (in degree)
         :param iter_max: maximum number of iteration in the 2theta convergence
-        :param resolution: precision of the 2theta convergence in fraction of dtth  
+        :param resolution: precision of the 2theta convergence in fraction of dtth
+        :param width: width of the sample, same unit as pixels  
         :return: center of bins, histogram of signal and histogram of normalization, cycles per data-point
         """
         
@@ -173,6 +178,8 @@ class OclMultiAnalyzer:
         kwags["dtth"] = numpy.deg2rad(dtth)
         kwags["roi_min"] = numpy.uint32(max(roi_min, 0))
         kwags["roi_max"] = numpy.uint32(min(roi_max, nroi))
+        kwags["local"] = pyopencl.LocalMemory(8*nroi)
+        kwags["width"] = numpy.int32(width/self.pixel)
         if do_debug:
             logger.info(f"Allocate `cycles` on device for {self.NUM_CRYSTAL*nroi*nframes/1e6}MB")
             self.buffers["cycles"] = cla.zeros(self.queue, (self.NUM_CRYSTAL, nroi, nframes), dtype=numpy.uint8)

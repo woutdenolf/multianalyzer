@@ -104,6 +104,10 @@ def parse():
                            help="Starting pixel on the detector, default:0")
     subparser.add_argument("--endp", type=int, default=1024,
                            help="End pixel on the detector to be considered, default:1024")
+    subparser.add_argument("--pixel", type=float, default=75e-3,
+                           help="Size of the pixel, default: 75e-3 mm")
+    subparser.add_argument("--width", type=float, default=0.0,
+                           help="Size of the beam-size on the sample, default: 0 mm")
 
     subparser = parser.add_argument_group('OpenCL options')
     subparser.add_argument("--device", type=str, default=None,
@@ -125,7 +129,7 @@ def rebin(options):
     # Ensure all units are consitent. Here lengths are in milimeters.
     L = param["L1"]
     L2 = param["L2"]
-    pixel = 75e-3
+    pixel = options.pixel
 
     # Angles are all given in degrees
     center = numpy.array(param["centre"])
@@ -171,7 +175,8 @@ def rebin(options):
                             iter_max=options.iter,
                             roi_min=options.startp,
                             roi_max=options.endp,
-                            phi_max=options.phi)
+                            phi_max=options.phi,
+                            width=options.width)
         t_end_rebinning = time.perf_counter()
         logger.info("Rebinning time: %.3fs", t_end_rebinning - t_start_rebinning)
         numpy.savez("dump", res)

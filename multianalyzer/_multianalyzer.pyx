@@ -4,7 +4,7 @@
 ##cython: linetrace=True
 
 __author__ = "Jérôme KIEFFER"
-__date__  = "24/02/2022"
+__date__  = "25/02/2022"
 __copyright__ = "2021, ESRF, France"
 __licence__ = "MIT"
 
@@ -29,7 +29,7 @@ cdef class MultiAnalyzer:
 
     """
     cdef:
-        public int NUM_CRYSTAL, NUM_ROI
+        public int NUM_CRYSTAL, NUM_ROI, do_debug
         public float64_t dr
         public float64_t L, L2, pixel, _tha, _thd, sin_tha, cot_tha, cos_thd
         public float64_t[::1] _center, _rollx, _rolly, _psi, cos_rx, sin_rx, cos_ry, sin_ry, _Lp, _Ln
@@ -39,6 +39,7 @@ cdef class MultiAnalyzer:
         "Performes the initialization of the data"
         self.NUM_CRYSTAL = len(center)
         self.NUM_ROI = 512
+        self.do_debug = logger.getEffectiveLevel()<=logging.DEBUG
         self.dr = pi/180.
         self._center = numpy.empty(self.NUM_CRYSTAL, dtype=numpy.float64) # position of the center, par analyzer
         self._psi = numpy.empty(self.NUM_CRYSTAL, dtype=numpy.float64)    # Analyzer position on 2th arm
@@ -417,7 +418,7 @@ cdef class MultiAnalyzer:
 
     cdef double _refine(self, int idr, int ida, 
                         double arm, double resolution=1e-8, int niter=250, 
-                        double phi_max=pi, int idf=-1) nogil:
+                        double sin_phi_max=1, int idf=-1) nogil:
         """Refine with the angles in radians
         
         :param idr: index of ROI
@@ -425,7 +426,7 @@ cdef class MultiAnalyzer:
         :param arm: position of the arm in 2theta in radians
         :param resolution: refine 2th to this resolution
         :param niter: max number of iterations (recorded in cycle if idf>=0
-        :param phi_max: maximal value of phi before discarding point
+        :param sin_phi_max: maximal value of sine of phi before discarding point
         :param idf: index of frame to record the number of cycles
         :return scattering angle 2theta in radian, NaN if not converged or |phi|>max_phi
         """
@@ -448,7 +449,6 @@ cdef class MultiAnalyzer:
             double sin_arm_d = sin(arm_d)
 
         zd = self._calc_zd(idr, ida)
-        #phi = self._init_phi(zd, arm_n) 
         sin_phi = self._init_sin_phi(zd, sin_arm_n)
         cos_phi = sqrt(1.0-sin_phi*sin_phi)
         tth_old = self._calc_tth_v2(ida, arm_n, sin_arm_a, cos_arm_a, sin_phi, cos_phi)
@@ -475,21 +475,22 @@ cdef class MultiAnalyzer:
                 tth = NAN
             else:
                 break
-            
-        
-        if idf>=0:
-            if i+1 == niter:
-                i = 251
-            elif not isfinite(L3):
-                i = 252
-            elif not isfinite(sin_phi):
-                i = 253
-            elif not isfinite(tth):
-                i = 254
-            self.cycles[ida, idr, idf] += i 
-
-        if (phi_max<pi) and (fabs(asin(sin_phi)) > phi_max):
+        if (fabs(sin_phi) >= sin_phi_max):
             tth = NAN
+            i = 250
+            
+        if self.do_debug:
+            if idf>=0:    
+                if i+1 == niter:
+                    i = 251
+                elif not isfinite(L3):
+                    i = 252
+                elif not isfinite(sin_phi):
+                    i = 253
+                elif not isfinite(tth):
+                    i = 254
+                self.cycles[ida, idr, idf] += i 
+                
 
         return tth
 
@@ -497,7 +498,7 @@ cdef class MultiAnalyzer:
                double arm, double resolution=1e-8, int niter=250, 
                double phi_max=90):
         """Refine the diffraction angle for an arm position any analyzer and any ROI"""
-        return self._refine(idr, ida, arm*self.dr, resolution*self.dr, niter, phi_max*self.dr)/self.dr
+        return self._refine(idr, ida, arm*self.dr, resolution*self.dr, niter, sin(phi_max*self.dr))/self.dr
     
     def integrate(self,
                   roicollection, 
@@ -533,7 +534,7 @@ cdef class MultiAnalyzer:
             int nbin, nroi, idx_roi, frame, ida, idr, value, idx, nframes = arm.shape[0]
             float64_t[:, ::1] norm_b
             float64_t[:, ::1] signal_b
-            double a, tth, nrm
+            double a, tth, nrm, sin_phi_max
             int32_t[:, :, ::1] roicoll = numpy.ascontiguousarray(roicollection, dtype=numpy.int32).reshape((nframes, self.NUM_CRYSTAL, -1))
         
         if width:
@@ -553,10 +554,11 @@ cdef class MultiAnalyzer:
         roi_step = abs(roi_step)
         nroi = (roi_max-roi_min) // roi_step
         
-        self.cycles = numpy.zeros((self.NUM_CRYSTAL, nroi, nframes), dtype=numpy.uint8)
+        if self.do_debug:
+            self.cycles = numpy.zeros((self.NUM_CRYSTAL, nroi, nframes), dtype=numpy.uint8)
         
         #switch to radians:
-        phi_max *= self.dr
+        sin_phi_max = sin(phi_max * self.dr)
         tth_min *= self.dr
         tth_max *= self.dr
         dtth *= self.dr
@@ -577,4 +579,7 @@ cdef class MultiAnalyzer:
                             idx = <int>floor((tth - tth_min)/dtth)
                             norm_b[ida, idx] = norm_b[ida, idx] + nrm
                             signal_b[ida, idx] = signal_b[ida, idx] + <float64_t> value
-        return numpy.asarray(tth_b), numpy.asarray(signal_b), numpy.asarray(norm_b), numpy.asarray(self.cycles)
+        if self.do_debug:
+            return numpy.asarray(tth_b), numpy.asarray(signal_b), numpy.asarray(norm_b), numpy.asarray(self.cycles)
+        else:
+            return numpy.asarray(tth_b), numpy.asarray(signal_b), numpy.asarray(norm_b)
