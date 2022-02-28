@@ -157,17 +157,21 @@ class OclMultiAnalyzer:
             max_frames = None
         print(max_frames)
         logger.info(f"Allocate `out_norm` on device for {4*self.NUM_CRYSTAL*nbin/1e6}MB")
-        self.buffers["out_norm"] = cla.zeros(self.queue, (self.NUM_CRYSTAL, nbin), dtype=numpy.int32)
+        self.buffers["out_norm"] = cla.empty(self.queue, (self.NUM_CRYSTAL, nbin), dtype=numpy.int32)
         logger.info(f"Allocate `out_signal` on device for {4*self.NUM_CRYSTAL*nbin/1e6}MB")
-        self.buffers["out_signal"] = cla.zeros(self.queue, (self.NUM_CRYSTAL, nbin), dtype=numpy.int32)
-        
+        self.buffers["out_signal"] = cla.empty(self.queue, (self.NUM_CRYSTAL, nbin), dtype=numpy.int32)
+        evt = self.prg.memset(self.queue, (nbin, self.NUM_CRYSTAL), None, 
+                              numpy.uint32(self.NUM_CRYSTAL),
+                              numpy.uint32(nbin),
+                              self.buffers["out_norm"].data,
+                              self.buffers["out_signal"].data)
         if max_frames:
             logger.info(f"Allocate partial `roicoll` on device for {numpy.dtype(numpy.int32).itemsize*self.NUM_CRYSTAL*nroi*max_frames/1e6}MB")
-            self.buffers["roicoll"] = cla.zeros(self.queue, (max_frames, self.NUM_CRYSTAL, nroi), dtype=numpy.int32)
+            self.buffers["roicoll"] = cla.empty(self.queue, (max_frames, self.NUM_CRYSTAL, nroi), dtype=numpy.int32)
             logger.info(f"Allocate partial  `mon` on device for {numpy.dtype(numpy.int32).itemsize*max_frames/1e6}MB")
-            self.buffers["monitor"] = cla.zeros(self.queue, (max_frames), dtype=numpy.int32)
+            self.buffers["monitor"] = cla.empty(self.queue, (max_frames), dtype=numpy.int32)
             logger.info(f"Allocate partial  `arm` on device for {numpy.dtype(numpy.float64).itemsize*max_frames/1e6}MB")
-            self.buffers["arm"] = cla.zeros(self.queue, (max_frames), dtype=numpy.float64)
+            self.buffers["arm"] = cla.empty(self.queue, (max_frames), dtype=numpy.float64)
         else:
             logger.info(f"Allocate complete `roicoll` on device for {roicoll.nbytes/1e6}MB")
             self.buffers["roicoll"] = cla.to_device(self.queue, roicoll)
@@ -198,12 +202,12 @@ class OclMultiAnalyzer:
             logger.info(f"Allocate `cycles` on device for {self.NUM_CRYSTAL*nroi*nframes/1e6}MB")
             
             if max_frames:
-                self.buffers["cycles"] = cla.zeros(self.queue, (self.NUM_CRYSTAL, nroi, max_frames), dtype=numpy.uint8)
+                self.buffers["cycles"] = cla.empty(self.queue, (self.NUM_CRYSTAL, nroi, max_frames), dtype=numpy.uint8)
             else:
-                self.buffers["cycles"] = cla.zeros(self.queue, (self.NUM_CRYSTAL, nroi, nframes), dtype=numpy.uint8)
+                self.buffers["cycles"] = cla.empty(self.queue, (self.NUM_CRYSTAL, nroi, nframes), dtype=numpy.uint8)
             cycles = numpy.zeros((self.NUM_CRYSTAL, nroi, nframes), dtype=numpy.uint8)
         else:
-            self.buffers["cycles"] = cla.zeros(self.queue, (1, 1, 1), dtype=numpy.uint8)
+            self.buffers["cycles"] = cla.empty(self.queue, (1, 1, 1), dtype=numpy.uint8)
         kwags["do_debug"] = numpy.int32(do_debug)
         kwags["cycles"] = self.buffers["cycles"].data
             
@@ -216,12 +220,22 @@ class OclMultiAnalyzer:
             logger.debug("\n".join(log))
         if max_frames:
             for start in range(0, nframes, max_frames):
-                stop = min(nframes, start+max_frames)
-                self.buffers["roicoll"].set(roicoll[start:stop, :, :])
-                self.buffers["monitor"].set(mon[start:stop])
-                self.buffers["arm"].set(arm[start:stop])
+                stop = start+max_frames
+                if stop<nframes:
+                    sub_roicol = roicoll[start:stop, :, :]
+                else:
+                    stop = nframes
+                    sub_roicol = numpy.empty((max_frames, self.NUM_CRYSTAL, nroi), dtype=numpy.int32)
+                    sub_roicol[:stop-start, ...] = roicoll[start:stop, ...]
+                    sub_arm = numpy.empty((max_frames), dtype=numpy.float64)
+                    sub_arm[:stop-start] = arm[start:stop]
+                    sub_mon = numpy.empty((max_frames), dtype=numpy.int32)
+                    sub_mon[:stop-start] = mon[start:stop]
+                self.buffers["roicoll"].set(sub_roicol)
+                self.buffers["monitor"].set(sub_mon)
+                self.buffers["arm"].set(sub_arm)
                 evt = self.prg.integrate(self.queue, (nroi, stop-start, self.NUM_CRYSTAL), (nroi, 1, 1), *kwags.values())
-                cycles[:, :, start:stop] = self.buffers["cycles"].get()
+                cycles[:, :, start:stop] = self.buffers["cycles"].get()[:, :, :stop-start]
         else:
             evt = self.prg.integrate(self.queue, (nroi, nframes, self.NUM_CRYSTAL), (nroi, 1, 1), *kwags.values())
             if do_debug:

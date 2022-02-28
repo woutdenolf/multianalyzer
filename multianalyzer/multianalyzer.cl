@@ -1,3 +1,18 @@
+// Memset output arrays
+kernel void memset(
+                uint num_crystal,
+                uint num_bin,
+                global int *out_signal,
+                global int *out_norm                
+                ){
+    int ida = get_global_id(1);
+    int bin = get_global_id(0);
+    if ((ida<num_crystal) && (bin<num_bin)){
+        int pos = ida*num_bin + bin;
+        out_signal[pos] = 0;
+        out_norm[pos] = 0;
+    }
+}
 
 /*
  * Set of function to calculate tth !
