@@ -223,6 +223,8 @@ class OclMultiAnalyzer:
                 stop = start+max_frames
                 if stop<nframes:
                     sub_roicol = roicoll[start:stop, :, :]
+                    sub_arm = arm[start:stop]
+                    sub_mon = mon[start:stop]
                 else:
                     stop = nframes
                     sub_roicol = numpy.empty((max_frames, self.NUM_CRYSTAL, nroi), dtype=numpy.int32)
