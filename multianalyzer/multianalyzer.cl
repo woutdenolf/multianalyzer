@@ -78,13 +78,17 @@ double calc_tth(double sin_tha,
 }
 
 
-double calc_sin_phi(double Lp, double sin_tha, double sin_rx, double cos_ry, double zd, double L3, double sin_tth)
+double calc_sin_phi(double Lp, double sin_tha, double sin_rx, double cos_ry, double zd, double L3, double sin_tth, double sin_phi_old)
 {//Implementation of Eq29
  
-    double num, den;
+    double num, den, res;
     num = zd + 2.0*L3*sin_tha*sin_rx*cos_ry;
     den = (Lp+L3) * sin_tth;
-    return clamp(num/den, -1.0, 1.0);
+    res = clamp(num/den, -1.0, 1.0);
+    if (fabs(sin_tth) < sin_tha){
+        res = 0.2*res + 0.8*sin_phi_old;
+    }
+    return res;
 }
 
 
@@ -147,7 +151,8 @@ double2 refine_tth(
     uint i;
     for (i=0; i<niter; i++){
         L3 = calc_L3(L, L2, Lp, sin_tha, cos_thd, cos_rx, sin_rx, sin_ry, sin_arm_d, cos_arm_d, sin_arm_a_n, cos_arm_a_n, sin_tth, cos_tth, sin_phi, cos_phi);
-        sin_phi = calc_sin_phi( Lp,  sin_tha,  sin_rx,  cos_ry,  zd,  L3,  sin_tth);
+        sin_phi = calc_sin_phi( Lp,  sin_tha,  sin_rx,  cos_ry,  zd,  L3,  sin_tth, sin_phi);
+        
         cos_phi = sqrt(1.0-sin_phi*sin_phi);
         tth = calc_tth(sin_tha, cos_rx, sin_rx, sin_ry, cos_ry, arm_n, sin_arm_a_n, cos_arm_a_n, sin_phi, cos_phi);
         sin_tth = sin(tth);
