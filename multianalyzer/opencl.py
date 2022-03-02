@@ -97,6 +97,7 @@ class OclMultiAnalyzer:
                                                           ('tth_max', None),
                                                           ("dtth", None),
                                                           ("width", numpy.int32(0)),
+                                                          ("dtthw", None),
                                                           ("out_signal", self.buffers["out_signal"]),
                                                           ("out_norm", self.buffers["out_norm"]),
                                                           ("do_debug", numpy.uint8(0)),
@@ -121,7 +122,8 @@ class OclMultiAnalyzer:
                   roi_step=1,
                   iter_max=250,
                   resolution=1e-3,
-                  width=1
+                  width=1,
+                  dtthw=None
                   ):
         """Performess the integration of the ROIstack recorded at given angles on t
         
@@ -133,12 +135,15 @@ class OclMultiAnalyzer:
         :param phi_max: discard data with |phi| larger than this value (in degree)
         :param iter_max: maximum number of iteration in the 2theta convergence
         :param resolution: precision of the 2theta convergence in fraction of dtth
-        :param width: width of the sample, same unit as pixels  
+        :param width: width of the sample, same unit as pixels
+        :param dtthw: Minimum precision expected for ROI being `width` appart, by default dtth
         :return: center of bins, histogram of signal and histogram of normalization, cycles per data-point
         """
         
         if roi_step and roi_step!=1:
             logger.warning("only roi_step=1 is supported in OpenCL")
+        dtthw = dtthw or dtth
+            
         do_debug = logger.getEffectiveLevel()<=logging.DEBUG
         nframes = arm.shape[0]
         roicoll = numpy.ascontiguousarray(roicollection, dtype=numpy.int32).reshape((nframes, self.NUM_CRYSTAL, -1))
@@ -198,7 +203,8 @@ class OclMultiAnalyzer:
         kwags["roi_min"] = numpy.uint32(max(roi_min, 0))
         kwags["roi_max"] = numpy.uint32(min(roi_max, nroi))
         kwags["local"] = pyopencl.LocalMemory(8*nroi)
-        kwags["width"] = numpy.int32(width/self.pixel)
+        kwags["width"] = numpy.int32(0.5*width/self.pixel)
+        kwags["dtthw"] = numpy.deg2rad(dtthw)
         if do_debug:
             logger.info(f"Allocate `cycles` on device for {self.NUM_CRYSTAL*nroi*nframes/1e6}MB")
             

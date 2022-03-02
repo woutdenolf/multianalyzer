@@ -227,6 +227,7 @@ kernel void  integrate(
         double tth_max,
         double dtth,
         int width, //in number of pixels
+        double dtthw,
         global int *out_signal,
         global int *out_norm,
         int do_debug,
@@ -257,13 +258,10 @@ kernel void  integrate(
     }
     cache[idr] = tth;
     barrier(CLK_LOCAL_MEM_FENCE);
+    
     if (width){
-        int other = ((idr>center[ida]))?(idr - width):(idr + width);
-        double delta = fabs(cache[other]-tth);
-//        if ((idf==1) && (idr==1)){
-//            printf("here %d %6.4f there %d %6.4f %.6f\n",idr, tth, other, cache[other], delta);
-//        }
-        if (!(delta<dtth)){
+        double delta = fabs(cache[max((int)0, (int)idr - width)] - cache[min((int)num_roi-1, (int)idr + width)]);
+        if (!(delta<dtthw)){
             active_thread = 0;
             c = 250;
             tth = NAN;

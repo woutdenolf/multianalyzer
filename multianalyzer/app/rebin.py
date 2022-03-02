@@ -32,7 +32,7 @@ __author__ = "Jérôme Kieffer"
 __contact__ = "Jerome.Kieffer@ESRF.eu"
 __license__ = "MIT"
 __copyright__ = "European Synchrotron Radiation Facility, Grenoble, France"
-__date__ = "24/02/2022"
+__date__ = "02/03/2022"
 __status__ = "development"
 
 import os
@@ -108,6 +108,8 @@ def parse():
                            help="Size of the pixel, default: 75e-3 mm")
     subparser.add_argument("--width", type=float, default=0.0,
                            help="Size of the beam-size on the sample, default: 0 mm")
+    subparser.add_argument("--delta2theta", type=float, default=0.0,
+                           help="Resolution in 2th, precision expected for 2 ROI being `width` appart")
 
     subparser = parser.add_argument_group('OpenCL options')
     subparser.add_argument("--device", type=str, default=None,
