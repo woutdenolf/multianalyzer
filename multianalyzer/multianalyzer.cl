@@ -73,7 +73,7 @@ double calc_tth(double sin_tha,
     double S1 = 132.456, S2=123.456;
       
     if (XpZ != 0.0){
-        D3 = sqrt(D2 - Z2);
+        D3 = sqrt(fmax(0.0, D2 - Z2));
         D2XZ = D2+XZ;
         D3Y = Y*D3;
         if (D2XZ != D3Y){

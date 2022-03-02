@@ -152,7 +152,8 @@ class OclMultiAnalyzer:
         
         arm = numpy.deg2rad(arm)
         try:
-            max_frames = int(int(self.ctx.devices[0].max_mem_alloc_size)/(numpy.dtype(numpy.int32).itemsize*self.NUM_CRYSTAL*nroi))
+            max_frames = min(int(int(self.ctx.devices[0].max_mem_alloc_size)/(numpy.dtype(numpy.int32).itemsize*self.NUM_CRYSTAL*nroi)), 
+                             nframes)
         except:
             max_frames = None
         print(max_frames)
@@ -185,7 +186,7 @@ class OclMultiAnalyzer:
         kwags["arm"] = self.buffers["arm"].data
         kwags["out_norm"] = self.buffers["out_norm"].data
         kwags["out_signal"] = self.buffers["out_signal"].data
-        kwags["num_frame"] = numpy.uint32(nframes)
+        kwags["num_frame"] = numpy.uint32(max_frames if max_frames else nframes)
         kwags["num_roi"] = numpy.uint32(nroi)
         kwags["num_bin"] = numpy.uint32(nbin)
         kwags["resolution"] = numpy.deg2rad(resolution*dtth)
