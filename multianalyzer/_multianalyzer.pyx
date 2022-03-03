@@ -4,7 +4,7 @@
 ##cython: linetrace=True
 
 __author__ = "Jérôme KIEFFER"
-__date__  = "25/02/2022"
+__date__  = "03/03/2022"
 __copyright__ = "2021, ESRF, France"
 __licence__ = "MIT"
 
@@ -394,12 +394,18 @@ cdef class MultiAnalyzer:
         # S2 = G - C
     
         #Solution from wolfram alpha    
+        #===========================
+        # solve X cos(t) + Y sin(t) = Z for t
+        # t = 2 π n + π and Z = -X and n element Z
+        # t = 2 (π n + tan^(-1)((Y - sqrt(X^2 + Y^2 - Z^2))/(X + Z))) and X + Z!=0 and X^2 + X Z + Y^2!=Y sqrt(X^2 + Y^2 - Z^2) and n element Z
+        # t = 2 (π n + tan^(-1)((sqrt(X^2 + Y^2 - Z^2) + Y)/(X + Z))) and X + Z!=0 and Y (sqrt(X^2 + Y^2 - Z^2) + Y) + X^2 + X Z!=0 and n element Z
+        # t = 2 π n - 2 tan^(-1)(X/Y) and Y!=0 and X^2 + Y^2!=0 and Z = -X and n element Z
         cdef double D3, XpZ=X+Z, Z2=Z*Z, XZ=X*Z, D2XZ, D3Y
         
         S1 = S2 = 132.456
           
         if XpZ != 0.0:
-            D3 = sqrt(D2 - Z2)
+            D3 = sqrt(D2 - Z2) if D2>Z2 else 0.0
             D2XZ = D2+XZ 
             D3Y = Y*D3
             if D2XZ != D3Y:
@@ -513,7 +519,8 @@ cdef class MultiAnalyzer:
                   int roi_step=1,
                   int iter_max=250,
                   float64_t resolution=1e-3,
-                  width=0):
+                  width=0,
+                  dtthw=None):
         """Performess the integration of the ROIstack recorded at given angles on t
         
         :param roi_stack: stack of (nframes,NUM_CRYSTAL*numROI) with the recorded signal
@@ -527,7 +534,8 @@ cdef class MultiAnalyzer:
         :param roi_step: consider ROIs stepwise
         :param iter_max: maximum number of iteration in the 2theta convergence
         :param resolution: precision of the 2theta convergence in fraction of dtth
-        :param width: unsupported for now, only works on OpenCL  
+        :param width: unsupported for now, only works on OpenCL
+        :param dtthw: unsupported for now, only works on OpenCL  
         :return: center of bins, histogram of signal and histogram of normalization, cycles per data-point
         """
         cdef:
