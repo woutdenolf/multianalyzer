@@ -260,8 +260,10 @@ kernel void  integrate(
     barrier(CLK_LOCAL_MEM_FENCE);
     
     if (width){
-        double delta = fabs(cache[max((int)0, (int)idr - width)] - cache[min((int)num_roi-1, (int)idr + width)]);
-        if (!(delta<dtthw)){
+        int start = max((int)0, (int)idr - width);
+        int stop = min((int)num_roi-1, (int)idr + width);
+        double delta = fabs(cache[start] - cache[stop]);
+        if (!((2.0*width*delta)<((stop-start)*dtthw))){
             active_thread = 0;
             c = 250;
             tth = NAN;
