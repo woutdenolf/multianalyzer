@@ -3,6 +3,7 @@ __license__ = "MIT"
 __date__ = "04/04/2022"
 
 import os
+import posixpath
 import sys
 import time
 import numpy
@@ -85,7 +86,12 @@ def ID22_bliss_parser(infile, entry=None):
         entries = [k for k, v in h.items() if v.attrs.get("NX_class") == "NXentry"]
         if not(entry and entry in entries):
             entries.sort()
-            entry = entries[0]
+            for entry in entries:
+                if not entry.endswith(".1"):
+                    continue
+                title = entry+"/title"
+                if (title in h) and (h[title].startswith("fscan")):
+                    break
         entry = h[entry]
         res["roicol"] = entry["measurement/eiger_roi_collection"][()]
         res["arm"] = entry["measurement/tth"][()]
@@ -483,12 +489,16 @@ def save_rebin(filename, beamline="id22", name="id22rebin", topas=None, res=None
             if weights is None:
                 weights = numpy.ones(res[1].shape[0])
             weights /= weights.sum() # normalize wights
-            I_avg = scale * (weights*res[1]).sum(axis=0) / (weights*res[2]).sum(axis=0)
-            I_ds = data_grp.create_dataset("I", data=I_avg , **CMP)
+            weights = numpy.atleast_2d(weights).T
+            # print(weights.shape)
+            # print(scale.shape)
+            I_avg =  (scale * weights * res[1]).sum(axis=0) / (weights*res[2]).sum(axis=0)
+            I_ds = data_grp.create_dataset("I_avg", data=I_avg , **CMP)
             I_ds.attrs["interpretation"] = "spectrum"
+            I_ds.attrs["axes"] = ["2th"]
             #TODO: perform uncertainty proagation using https://en.wikipedia.org/wiki/Weighted_arithmetic_mean
             
-            data_grp.attrs["signal"] = "I"
+            data_grp.attrs["signal"] = posixpath.basename(I_ds.name)
             entry.attrs["default"] = data_grp.name
             if len(res) >= 4:
                 debug_ds = data_grp.create_dataset("cycles", data=res[3] , **CMP)
