@@ -244,7 +244,8 @@ class OclMultiAnalyzer:
                 self.buffers["monitor"].set(sub_mon)
                 self.buffers["arm"].set(sub_arm)
                 evt = self.prg.integrate(self.queue, (nroi, stop-start, self.NUM_CRYSTAL), (nroi, 1, 1), *kwags.values())
-                cycles[:, :, start:stop] = self.buffers["cycles"].get()[:, :, :stop-start]
+                if do_debug:
+                    cycles[:, :, start:stop] = self.buffers["cycles"].get()[:, :, :stop-start]
         else:
             evt = self.prg.integrate(self.queue, (nroi, nframes, self.NUM_CRYSTAL), (nroi, 1, 1), *kwags.values())
             if do_debug:
