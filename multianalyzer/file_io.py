@@ -1,6 +1,6 @@
 __authors__ = ["Jérôme Kieffer"]
 __license__ = "MIT"
-__date__ = "24/02/2022"
+__date__ = "04/04/2022"
 
 import os
 import sys
@@ -46,16 +46,18 @@ def topas_parser(infile):
             if words[0] == "Wavelength":
                 res["wavelength"] = float(words[2])
             if words[:2] == ["manom", "mantth"]:
+                lkeys = words
                 line = f.readline()
                 words = line.split()
-                res["manom"] = float(words[0])
-                res["mantth"] = float(words[1])
+                for k,v in zip(lkeys, words):
+                    res[k] = float(v)
             if words[:2] == ["L1", "L2"]:
                 line = f.readline()
                 words = line.split()
                 res["L1"] = float(words[0])
                 res["L2"] = float(words[1])
-            if words == keys:
+            if len(words)>=len(keys) and words[:len(keys)] == keys:
+                keys = words
                 for k in keys:
                     res[k] = []
                 for line in f:
