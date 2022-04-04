@@ -161,7 +161,6 @@ class OclMultiAnalyzer:
                              nframes)
         except:
             max_frames = None
-        print(max_frames)
         logger.info(f"Allocate `out_norm` on device for {4*self.NUM_CRYSTAL*nbin/1e6}MB")
         self.buffers["out_norm"] = cla.empty(self.queue, (self.NUM_CRYSTAL, nbin), dtype=numpy.int32)
         logger.info(f"Allocate `out_signal` on device for {4*self.NUM_CRYSTAL*nbin/1e6}MB")
