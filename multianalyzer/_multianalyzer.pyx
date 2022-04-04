@@ -4,7 +4,7 @@
 ##cython: linetrace=True
 
 __author__ = "Jérôme KIEFFER"
-__date__  = "03/03/2022"
+__date__  = "04/04/2022"
 __copyright__ = "2021, ESRF, France"
 __licence__ = "MIT"
 
@@ -545,8 +545,8 @@ cdef class MultiAnalyzer:
             double a, tth, nrm, sin_phi_max
             int32_t[:, :, ::1] roicoll = numpy.ascontiguousarray(roicollection, dtype=numpy.int32).reshape((nframes, self.NUM_CRYSTAL, -1))
         
-        if width:
-            logger.warning("Width parameter is not supported in Cython implementation")
+        if dtthw:
+            logger.warning("Width/dtthw parameters are not supported in Cython implementation")
         tth_max += 0.5 * dtth
         tth_b = numpy.arange(tth_min, tth_max + 0.4999999 * dtth, dtth)
         tth_min -= 0.5 * dtth
