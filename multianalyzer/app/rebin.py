@@ -32,7 +32,7 @@ __author__ = "Jérôme Kieffer"
 __contact__ = "Jerome.Kieffer@ESRF.eu"
 __license__ = "MIT"
 __copyright__ = "European Synchrotron Radiation Facility, Grenoble, France"
-__date__ = "03/03/2022"
+__date__ = "04/04/2022"
 __status__ = "development"
 
 import os
@@ -76,28 +76,32 @@ def parse():
     version = f"{name} version {_version.version}"
     parser = ArgumentParser(usage=usage, description=description, epilog=epilog)
     parser.add_argument("-v", "--version", action='version', version=version)
-    parser.add_argument("-d", "--debug",
-                        action="store_true", dest="debug", default=False,
-                        help="switch to verbose/debug mode")
-    parser.add_argument("-w", "--wavelength", type=float, default=None,
-                        help="Wavelength of the incident beam (in Å). Default: use the one in `topas` file")
-    parser.add_argument("-e", "--energy", type=float, default=None,
-                        help="Energy of the incident beam (in keV). Replaces wavelength")
-    parser.add_argument("-o", "--output", type=str, default=None,
-                        help="Output filename (in HDF5)")
     required = parser.add_argument_group('Required arguments')
     required.add_argument("args", metavar='FILE', type=str, nargs=1,
                         help="HDF5 file with ROI-collection")
     required.add_argument("-p", "--pars", metavar='FILE', type=str,
                           help="`topas` refinement file", required=True)
+    optional = parser.add_argument_group('Optional arguments')
+    parser.add_argument("-o", "--output", type=str, default=None,
+                        help="Output filename (in HDF5)")
+    optional.add_argument("--entry", type=str, default=None,
+                           help="Entry name (aka scan name) in the input HDF5 file to process. It should be a `fscan`. "
+                           "By default, the HDF5 is scanned and the first `fscan` is selected.")
+    optional.add_argument("-d", "--debug",
+                        action="store_true", dest="debug", default=False,
+                        help="switch to verbose/debug mode")
+    optional.add_argument("-w", "--wavelength", type=float, default=None,
+                        help="Wavelength of the incident beam (in Å). Default: use the one in `topas` file")
+    optional.add_argument("-e", "--energy", type=float, default=None,
+                        help="Energy of the incident beam (in keV). Replaces wavelength")
 
     subparser = parser.add_argument_group('Rebinning options')
     subparser.add_argument("-s", "--step", type=float, default=None,
                            help="Step size of the 2θ scale. Default: the step size of the scan of the arm")
     subparser.add_argument("-r", "--range", type=float, default=None, nargs=2,
                            help="2θ range in degree. Default: the scan of the arm + analyzer amplitude")
-    subparser.add_argument("--phi", type=float, default=90,
-                           help="φ_max: Maximum opening angle in azimuthal direction in degrees. Default: 90°, i.e. no restriction")
+    subparser.add_argument("--phi", type=float, default=75,
+                           help="φ_max: Maximum opening angle in azimuthal direction in degrees. Default: 75°, i.e. no restriction")
     subparser.add_argument("--iter", type=int, default=250,
                            help="Maximum number of iteration for the 2theta convergence loop, default:100")
     subparser.add_argument("--startp", type=int, default=0,
@@ -154,7 +158,7 @@ def rebin(options):
     for infile in options.args:
         print(f"Read ROI-collection from  HDF5 file: {infile}")
         t_start_reading = time.perf_counter()
-        hdf5_data = ID22_bliss_parser(infile)
+        hdf5_data = ID22_bliss_parser(infile, entry=options.entry)
         t_end_reading = time.perf_counter()
         logger.info("HDF5 read time: %.3fs", t_end_reading - t_start_reading)
 
@@ -163,8 +167,8 @@ def rebin(options):
         mon = hdf5_data["mon"]
         dtth = options.step or (abs(numpy.median(arm[1:] - arm[:-1])))
         if options.range:
-            tth_min = min(options.range)
-            tth_max = max(options.range)
+            tth_min = options.range[0] if numpy.isfinite(options.range[0]) else  arm.min() + psi.min()
+            tth_max = options.range[0] if numpy.isfinite(options.range[1]) else  arm.max() + psi.max()
         else:
             tth_min = arm.min() + psi.min()
             tth_max = arm.max() + psi.max()
@@ -178,7 +182,7 @@ def rebin(options):
                             roi_min=options.startp,
                             roi_max=options.endp,
                             phi_max=options.phi,
-                            width=options.width,
+                            width=options.width or param.get("wg", 0.0),
                             dtthw=options.delta2theta)
         t_end_rebinning = time.perf_counter()
         logger.info("Rebinning time: %.3fs", t_end_rebinning - t_start_rebinning)
