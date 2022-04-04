@@ -90,8 +90,14 @@ def ID22_bliss_parser(infile, entry=None):
                 if not entry.endswith(".1"):
                     continue
                 title = entry+"/title"
-                if (title in h) and (h[title].startswith("fscan")):
-                    break
+                if title in h:
+                    title = h[title][()]
+                    try:
+                        title = title.decode()
+                    except:
+                        pass
+                    if title.startswith("fscan"):
+                        break
         entry = h[entry]
         res["roicol"] = entry["measurement/eiger_roi_collection"][()]
         res["arm"] = entry["measurement/tth"][()]

@@ -101,7 +101,7 @@ def parse():
     subparser.add_argument("-r", "--range", type=float, default=None, nargs=2,
                            help="2θ range in degree. Default: the scan of the arm + analyzer amplitude")
     subparser.add_argument("--phi", type=float, default=75,
-                           help="φ_max: Maximum opening angle in azimuthal direction in degrees. Default: 75°, i.e. no restriction")
+                           help="φ_max: Maximum opening angle in azimuthal direction in degrees. Default: 75°")
     subparser.add_argument("--iter", type=int, default=250,
                            help="Maximum number of iteration for the 2theta convergence loop, default:100")
     subparser.add_argument("--startp", type=int, default=0,
@@ -111,9 +111,9 @@ def parse():
     subparser.add_argument("--pixel", type=float, default=75e-3,
                            help="Size of the pixel, default: 75e-3 mm")
     subparser.add_argument("--width", type=float, default=0.0,
-                           help="Size of the beam-size on the sample, default: 0 mm")
+                           help="Size of the beam-size on the sample, default from topas file: ~1 mm")
     subparser.add_argument("--delta2theta", type=float, default=0.0,
-                           help="Resolution in 2θ, precision expected for 2 ROI being `width` appart on each side of the ROI of interest")
+                           help="Resolution in 2θ, precision expected for 2 ROI being `width` appart on each side of the ROI of interest (disabled by default)")
 
     subparser = parser.add_argument_group('OpenCL options')
     subparser.add_argument("--device", type=str, default=None,
