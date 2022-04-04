@@ -439,6 +439,7 @@ def save_rebin(filename, beamline="id22", name="id22rebin", topas=None, res=None
     :param topas: dict with topas configuration
     :param res: 3/4-tuple with results
     """
+    weights = None
     with  Nexus(filename, mode="w", creator=name) as nxs:
         entry = nxs.new_entry(entry="entry", program_name=name,
                               title=None, force_time=start_time, force_name=False)
@@ -459,21 +460,34 @@ def save_rebin(filename, beamline="id22", name="id22rebin", topas=None, res=None
             data_grp = nxs.new_class(process_grp, "data", "NXdata")
             tth_ds = data_grp.create_dataset("2th", data=res[0], **CMP)
             tth_ds.attrs["unit"] = "deg"
+            
             sum_ds = data_grp.create_dataset("I_sum", data=res[1], **CMP)
             sum_ds.attrs["interpretation"] = "spectrum"
             norm_ds = data_grp.create_dataset("norm", data=res[2], **CMP)
             norm_ds.attrs["interpretation"] = "spectrum"
+            
             scale = numpy.atleast_2d(numpy.median(res[2], axis=-1)).T
             with numpy.errstate(divide='ignore', invalid='ignore'):
                 I = scale * res[1] / res[2]
-            I_ds = data_grp.create_dataset("I", data=I , **CMP)
+            Ima_ds = data_grp.create_dataset("I_MA", data=I , **CMP)
+            Ima_ds.attrs["interpretation"] = "spectrum"
+            
             if topas:
-                I_ds.attrs["axes"] = ["offset", "2th"]
+                Ima_ds.attrs["axes"] = ["offset", "2th"]
                 offset_ds = data_grp.create_dataset("offset", data=numpy.rad2deg(topas["offset"]))
                 offset_ds.attrs["unit"] = "deg"
+                weights = numpy.array(topas.get("scale"))
             else:
-                I_ds.attrs["axes"] = [".", "2th"]
+                Ima_ds.attrs["axes"] = [".", "2th"]
+                
+            if weights is None:
+                weights = numpy.ones(res[1].shape[0])
+            weights /= weights.sum() # normalize wights
+            I_avg = scale * (weights*res[1]).sum(axis=0) / (weights*res[2]).sum(axis=0)
+            I_ds = data_grp.create_dataset("I", data=I_avg , **CMP)
             I_ds.attrs["interpretation"] = "spectrum"
+            #TODO: perform uncertainty proagation using https://en.wikipedia.org/wiki/Weighted_arithmetic_mean
+            
             data_grp.attrs["signal"] = "I"
             entry.attrs["default"] = data_grp.name
             if len(res) >= 4:
