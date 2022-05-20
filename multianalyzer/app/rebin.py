@@ -165,6 +165,12 @@ def rebin(options):
         roicol = hdf5_data["roicol"]
         arm = hdf5_data["arm"]
         mon = hdf5_data["mon"]
+        if len(roicol)!=len(arm) or len(arm)!=len(mon):
+            kept_points = min(len(roicol), len(arm), len(mon))
+            roicol = roicol[:kept_points]
+            arm = arm[:kept_points]
+            mon = mon[:kept_points]
+            logger.warning(f"Some arrays have different length, was the scan interupted ? shrinking scan size: {kept_points} !")
         dtth = options.step or (abs(numpy.median(arm[1:] - arm[:-1])))
         if options.range:
             tth_min = options.range[0] if numpy.isfinite(options.range[0]) else  arm.min() + psi.min()
