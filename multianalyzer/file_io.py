@@ -452,7 +452,7 @@ class Nexus(object):
         return dec
 
 
-def save_rebin(filename, beamline="id22", name="id22rebin", topas=None, res=None, start_time=None):
+def save_rebin(filename, beamline="id22", name="id22rebin", topas=None, res=None, start_time=None, entry="entry"):
     """Save rebinned data with external links to input data
     
     :param filename:
@@ -462,9 +462,10 @@ def save_rebin(filename, beamline="id22", name="id22rebin", topas=None, res=None
     :param res: 3/4-tuple with results
     """
     weights = None
-    with  Nexus(filename, mode="w", creator=name) as nxs:
-        entry = nxs.new_entry(entry="entry", program_name=name,
-                              title=None, force_time=start_time, force_name=False)
+    with  Nexus(filename, mode="a", creator=name) as nxs:
+        entry = nxs.new_entry(entry=entry, program_name=name, 
+                              title=None, force_time=start_time, 
+                              force_name=entry!="entry")
         process_grp = nxs.new_class(entry, "id22rebin", class_type="NXprocess")
         process_grp["program"] = name
         process_grp["sequence_index"] = 1
