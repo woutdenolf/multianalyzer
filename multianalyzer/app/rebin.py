@@ -37,6 +37,7 @@ __status__ = "development"
 
 import os
 from argparse import ArgumentParser
+from contextlib import contextmanager
 import logging
 import time
 try:
@@ -63,7 +64,7 @@ try:
     from ..opencl import OclMultiAnalyzer
 except ImportError:
     OclMultiAnalyzer = None
-from ..file_io import topas_parser, ID22_bliss_parser, save_rebin, get_isotime
+from ..file_io import topas_parser, ID22_bliss_parser, save_rebin, all_entrees, get_isotime
 
 
 def parse():
@@ -76,16 +77,18 @@ def parse():
     version = f"{name} version {_version.version}"
     parser = ArgumentParser(usage=usage, description=description, epilog=epilog)
     parser.add_argument("-v", "--version", action='version', version=version)
+
     required = parser.add_argument_group('Required arguments')
     required.add_argument("args", metavar='FILE', type=str, nargs=1,
                         help="HDF5 file with ROI-collection")
     required.add_argument("-p", "--pars", metavar='FILE', type=str,
                           help="`topas` refinement file", required=True)
+
     optional = parser.add_argument_group('Optional arguments')
     parser.add_argument("-o", "--output", type=str, default=None,
                         help="Output filename (in HDF5)")
-    optional.add_argument("--entry", type=str, default=None,
-                           help="Entry name (aka scan name) in the input HDF5 file to process. It should be a `fscan`. "
+    optional.add_argument("--entries", nargs="*", default=list(),
+                           help="Entry names (aka scan names) in the input HDF5 file to process. It should be a `fscan`. "
                            "By default, the HDF5 is scanned and ALL `fscan` entries are processed.")
     optional.add_argument("-d", "--debug",
                         action="store_true", dest="debug", default=False,
@@ -124,22 +127,42 @@ def parse():
     if options.debug:
         logger.setLevel(logging.DEBUG)
         logging.root.setLevel(level=logging.DEBUG)
+
     return options
 
 
-def rebin(options):
-    start_time = get_isotime()
-    t_start = time.perf_counter()
-    rt_read = 0.0
-    rt_rebin = 0.0
-    rt_write = 0.0
-    
-    print(f"Load topas refinement file: {options.pars}")
-    param = topas_parser(options.pars)
+def rebin_result_generator(filename=None, entries=None, hdf5_data=None, output=None, timer=None, pars=None, device=None, debug=None, energy=None, wavelength=None,
+               pixel=None, step=None, range=None, phi=None, width=None, delta2theta=None, iter=None, startp=None, endp=None):
+    if not pars:
+        raise ValueError("'pars' parameter is missing")
+    if pixel is None:
+        pixel = 75e-3
+    if phi is None:
+        phi = 75
+    if width is None:
+        width = 0.0
+    if delta2theta is None:
+        delta2theta = 0.0
+    if startp is None:
+        startp = 0
+    if endp is None:
+        endp = 1024
+    if iter is None:
+        iter = 250
+    if timer is None:
+        timer = Timer()
+    if hdf5_data is None:
+        output = output or os.path.splitext(filename)[0] + "_rebin.h5"
+    else:
+        if not output:
+            raise ValueError("'output' parameter is missing")
+    processed = all_entrees(output)
+
+    print(f"Load topas refinement file: {pars}")
+    param = topas_parser(pars)
     # Ensure all units are consitent. Here lengths are in milimeters.
     L = param["L1"]
     L2 = param["L2"]
-    pixel = options.pixel
 
     # Angles are all given in degrees
     center = numpy.array(param["centre"])
@@ -153,74 +176,116 @@ def rebin(options):
     thd = numpy.rad2deg(param["mantth"])
 
     # Finally initialize the rebinning engine.
-    if options.device and OclMultiAnalyzer:
-        mma = OclMultiAnalyzer(L, L2, pixel, center, tha, thd, psi, rollx, rolly, device=options.device.split(","))
+    if device and OclMultiAnalyzer:
+        mma = OclMultiAnalyzer(L, L2, pixel, center, tha, thd, psi, rollx, rolly, device=device.split(","))
         print(f"Using device {mma.ctx.devices[0]}")
     else:
         mma = MultiAnalyzer(L, L2, pixel, center, tha, thd, psi, rollx, rolly)
         print("Using Cython+OpenMP")
-    for infile in options.args:
-        print(f"Read ROI-collection from  HDF5 file: {infile}")
 
-        output = options.output or os.path.splitext(infile)[0] + "_rebin.h5"
-        if os.path.exists(output):
-            logger.warning(f"Output file {output} exist, removing!")
-            os.unlink(output)
+    if hdf5_data is None:
+        print(f"Read ROI-collection from HDF5 file: {filename}")
+        with timer.timeit_read():
+            hdf5_data = ID22_bliss_parser(filename, entries=entries, exclude_entries=processed)
 
-        t_start_reading = time.perf_counter()
-        hdf5_data = ID22_bliss_parser(infile, entry=options.entry)
-        t_end_reading = time.perf_counter()
-        rt_read += t_end_reading - t_start_reading
-        logger.info(f"HDF5 read time: {rt_read:.3f}s for {len(hdf5_data)} entries")
+    print(f"Processing {len(hdf5_data)} entries: {list(hdf5_data)}")
 
-        for entry in hdf5_data:
-            roicol = hdf5_data[entry]["roicol"]
-            arm = hdf5_data[entry]["arm"]
-            mon = hdf5_data[entry]["mon"]
-            if len(roicol)!=len(arm) or len(arm)!=len(mon):
-                kept_points = min(len(roicol), len(arm), len(mon))
-                roicol = roicol[:kept_points]
-                arm = arm[:kept_points]
-                mon = mon[:kept_points]
-                logger.warning(f"Some arrays have different length, was the scan interrupted ? shrinking scan size: {kept_points} !")
-            dtth = options.step or (abs(numpy.median(arm[1:] - arm[:-1])))
-            if options.range:
-                tth_min = options.range[0] if numpy.isfinite(options.range[0]) else  arm.min() + psi.min()
-                tth_max = options.range[0] if numpy.isfinite(options.range[1]) else  arm.max() + psi.max()
-            else:
-                tth_min = arm.min() + psi.min()
-                tth_max = arm.max() + psi.max()
-            print(f"Rebin data from {infile}::{entry}")
-            t_start_rebinning = time.perf_counter()
+    for entry in hdf5_data:
+        if entry in processed:
+            logger.warning("Skip entry '%s' (already processed)", entry)
+            continue
+
+        roicol = hdf5_data[entry]["roicol"]
+        arm = hdf5_data[entry]["arm"]
+        mon = hdf5_data[entry]["mon"]
+        if len(roicol)!=len(arm) or len(arm)!=len(mon):
+            kept_points = min(len(roicol), len(arm), len(mon))
+            roicol = roicol[:kept_points]
+            arm = arm[:kept_points]
+            mon = mon[:kept_points]
+            logger.warning(f"Some arrays have different length, was the scan interrupted ? shrinking scan size: {kept_points} !")
+        dtth = step or (abs(numpy.median(arm[1:] - arm[:-1])))
+        if range:
+            tth_min = range[0] if numpy.isfinite(range[0]) else  arm.min() + psi.min()
+            tth_max = range[0] if numpy.isfinite(range[1]) else  arm.max() + psi.max()
+        else:
+            tth_min = arm.min() + psi.min()
+            tth_max = arm.max() + psi.max()
+
+        print(f"Rebin data from {filename}::{entry}")
+        with timer.timeit_rebin():
             res = mma.integrate(roicol,
                                 arm,
                                 mon,
                                 tth_min, tth_max, dtth=dtth,
-                                iter_max=options.iter,
-                                roi_min=options.startp,
-                                roi_max=options.endp,
-                                phi_max=options.phi,
-                                width=options.width or param.get("wg", 0.0),
-                                dtthw=options.delta2theta)
-            t_end_rebinning = time.perf_counter()
-            logger.info(f"Rebinning time: {t_end_rebinning - t_start_rebinning:.3f}s")
-            numpy.savez("dump", res)
-            print(f"Save to {output}::{entry}")
-            t_start_saving = time.perf_counter()
-            save_rebin(output, beamline="id22", name="id22rebin", topas=param, res=res, start_time=start_time, entry=entry)
-            t_end_saving = time.perf_counter()
-            logger.info(f"HDF5 write time: {t_end_saving - t_start_saving:.3f}s")
-            
-            rt_rebin += t_end_rebinning - t_start_rebinning
-            rt_write += t_end_saving - t_start_saving
+                                iter_max=iter,
+                                roi_min=startp,
+                                roi_max=endp,
+                                phi_max=phi,
+                                width=width or param.get("wg", 0.0),
+                                dtthw=delta2theta)
 
-    print(f"Total execution time: {time.perf_counter()-t_start:.3f}s (of which read:{rt_read:.3f}s regrid:{rt_rebin:.3f} write:{rt_write:.3f}s)")
-    return res
+        if debug:
+            numpy.savez("dump", res)
+
+        if output:
+            print(f"Save to {output}::{entry}")
+            with timer.timeit_write():
+                save_rebin(output, beamline="id22", name="id22rebin", topas=param, res=res, start_time=timer.start_time, entry=entry)
+        yield res
+
+
+def rebin_file(**kwargs):
+    for _ in rebin_result_generator(**kwargs):
+        pass
+
+
+class Timer():
+    def __init__(self) -> None:
+        self.start_time = get_isotime()
+        self.t_start = time.perf_counter()
+        self.rt_read = 0.0
+        self.rt_rebin = 0.0
+        self.rt_write = 0.0
+
+    def print(self):
+        print(f"Total execution time: {time.perf_counter()-self.t_start:.3f}s (of which read:{self.rt_read:.3f}s regrid:{self.rt_rebin:.3f} write:{self.rt_write:.3f}s)")
+
+    @contextmanager
+    def timeit_read(self):
+        t0 = time.perf_counter()
+        yield
+        t1 = time.perf_counter()
+        dt = t1 - t0
+        self.rt_read += dt
+        logger.info(f"HDF5 read time: {dt:.3f}s")
+
+    @contextmanager
+    def timeit_write(self):
+        t0 = time.perf_counter()
+        yield
+        t1 = time.perf_counter()
+        dt = t1 - t0
+        self.rt_write += dt
+        logger.info(f"HDF5 write time: {dt:.3f}s")
+
+    @contextmanager
+    def timeit_rebin(self):
+        t0 = time.perf_counter()
+        yield
+        t1 = time.perf_counter()
+        dt = t1 - t0
+        self.rt_rebin += dt
+        logger.info(f"Rebinning time: {dt:.3f}s")
 
 
 def main():
-    options = parse()
-    rebin(options)
+    options = vars(parse())
+    filenames = options.pop("args")
+    timer = Timer()
+    for filename in filenames:
+        rebin_file(filename=filename, timer=timer, **options)
+    timer.print()
 
 
 if __name__ == "__main__":
