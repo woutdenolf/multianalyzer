@@ -64,7 +64,7 @@ try:
     from ..opencl import OclMultiAnalyzer
 except ImportError:
     OclMultiAnalyzer = None
-from ..file_io import topas_parser, ID22_bliss_parser, save_rebin, all_entrees, get_isotime
+from ..file_io import topas_parser, ID22_bliss_parser, save_rebin, all_entries, get_isotime
 
 
 def parse():
@@ -156,7 +156,7 @@ def rebin_result_generator(filename=None, entries=None, hdf5_data=None, output=N
     else:
         if not output:
             raise ValueError("'output' parameter is missing")
-    processed = all_entrees(output)
+    processed = all_entries(output)
 
     print(f"Load topas refinement file: {pars}")
     param = topas_parser(pars)

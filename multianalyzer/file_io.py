@@ -528,7 +528,7 @@ def save_rebin(filename, beamline="id22", name="id22rebin", topas=None, res=None
                 debug_ds.attrs["info"] = "Number of refinement cycle to converge 2theta"
 
 
-def all_entrees(filename):
+def all_entries(filename):
     """
     :param filename:
     :returns list:
