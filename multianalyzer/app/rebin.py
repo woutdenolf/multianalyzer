@@ -153,9 +153,11 @@ def rebin_result_generator(filename=None, entries=None, hdf5_data=None, output=N
         timer = Timer()
     if hdf5_data is None:
         output = output or os.path.splitext(filename)[0] + "_rebin.h5"
+        source_name = filename
     else:
         if not output:
             raise ValueError("'output' parameter is missing")
+        source_name = "<memory>"
     processed = all_entries(output)
 
     print(f"Load topas refinement file: {pars}")
@@ -212,7 +214,7 @@ def rebin_result_generator(filename=None, entries=None, hdf5_data=None, output=N
             tth_min = arm.min() + psi.min()
             tth_max = arm.max() + psi.max()
 
-        print(f"Rebin data from {filename}::{entry}")
+        print(f"Rebin data from {source_name}::{entry}")
         with timer.timeit_rebin():
             res = mma.integrate(roicol,
                                 arm,
