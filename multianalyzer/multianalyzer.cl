@@ -207,7 +207,8 @@ kernel void  integrate(
         global double *d_arm,
         uint num_crystal,
         uint num_frame,
-        uint num_roi, 
+        uint num_roi,
+        uint num_pix,
         uint num_bin,
         double L, 
         double L2, 
@@ -271,11 +272,15 @@ kernel void  integrate(
     }
     if (active_thread && (tth>=tth_min) && (tth<tth_max)){
         int nrm = monitor[idf];
-        int value = roicoll[idf*num_roi*num_crystal + ida*num_roi + idr];
         int idx = convert_int_rtn((tth - tth_min)/dtth);
         size_t pos = num_bin*ida + idx;
-        atomic_add(&out_signal[pos], value);
         atomic_add(&out_norm[pos], nrm);
+        size_t read_pos = ((idf*num_crystal + ida)*num_roi + idr) * num_pix;
+        size_t write_pos = pos*num_pix;
+        for (int pix=0; pix<num_pix; pix++){
+            atomic_add(&out_signal[write_pos+pix], roicoll[read_pos+pix]);
+        }
+        
     }
     
     if (do_debug){
