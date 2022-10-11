@@ -1,16 +1,18 @@
 // Memset output arrays
 kernel void memset(
-                uint num_crystal,
-                uint num_bin,
-                global int *out_signal,
-                global int *out_norm                
+                uint num_crystal,       // numberof analyzer crystal
+                uint num_bin,           // number of bins 
+                uint num_pix,           // number of pixel in one ROI
+                global int *out_signal, // shape (num_analyzer, num_bin, num_pix)
+                global int *out_norm    // shape (num_analyzer, num_bin)            
                 ){
-    int ida = get_global_id(1);
     int bin = get_global_id(0);
+    int ida = get_global_id(1);
     if ((ida<num_crystal) && (bin<num_bin)){
         int pos = ida*num_bin + bin;
-        out_signal[pos] = 0;
         out_norm[pos] = 0;
+        for (int i=pos*num_pix;i<pos*(num_pix+1); i++)
+            out_signal[i] = 0;
     }
 }
 

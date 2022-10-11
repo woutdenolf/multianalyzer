@@ -4,7 +4,7 @@
 ##cython: linetrace=True
 
 __author__ = "Jérôme KIEFFER"
-__date__  = "04/04/2022"
+__date__  = "11/10/2022"
 __copyright__ = "2021, ESRF, France"
 __licence__ = "MIT"
 
@@ -513,6 +513,8 @@ cdef class MultiAnalyzer:
                   float64_t tth_min, 
                   float64_t tth_max, 
                   float64_t dtth, 
+                  int nroi = 512,
+                  int npix = 31,
                   float64_t phi_max=90.,
                   int roi_min=0,
                   int roi_max=1024,
@@ -539,20 +541,20 @@ cdef class MultiAnalyzer:
         :return: center of bins, histogram of signal and histogram of normalization, cycles per data-point
         """
         cdef:
-            int nbin, nroi, idx_roi, frame, ida, idr, value, idx, nframes = arm.shape[0]
+            int nbin, idx_roi, frame, ida, idr, value, idx, idp, nframes = arm.shape[0]
             float64_t[:, ::1] norm_b
-            float64_t[:, ::1] signal_b
+            float64_t[:, :, :1] signal_b
             double a, tth, nrm, sin_phi_max
-            int32_t[:, :, ::1] roicoll = numpy.ascontiguousarray(roicollection, dtype=numpy.int32).reshape((nframes, self.NUM_CRYSTAL, -1))
+            int32_t[:, :, :, ::1] roicoll = numpy.ascontiguousarray(roicollection, dtype=numpy.int32).reshape((nframes, self.NUM_CRYSTAL, nroi, npix))
         
         if dtthw:
             logger.warning("Width/dtthw parameters are not supported in Cython implementation")
         tth_max += 0.5 * dtth
-        tth_b = numpy.arange(tth_min, tth_max + 0.4999999 * dtth, dtth)
+        tth_b = numpy.arange(tth_min, tth_max + (0.5-numpy.finfo("float64").eps) * dtth, dtth)
         tth_min -= 0.5 * dtth
         nbin = tth_b.size
         norm_b = numpy.zeros((self.NUM_CRYSTAL, nbin), dtype=numpy.float64)
-        signal_b = numpy.zeros((self.NUM_CRYSTAL, nbin), dtype=numpy.float64)
+        signal_b = numpy.zeros((self.NUM_CRYSTAL, nbin, npix), dtype=numpy.int32)
         assert mon.shape[0] == arm.shape[0], "monitor array shape matches the one from arm array "        
                
         roi_min, roi_max = min(roi_min, roi_max), max(roi_min, roi_max)
@@ -579,14 +581,14 @@ cdef class MultiAnalyzer:
                     idx_roi = roi_min - roi_step
                     for idr in range(nroi):
                         idx_roi = idx_roi + roi_step
-                        value = roicoll[frame, ida, idx_roi]
-                        if value>65530:
-                            continue
                         tth = self._refine(idx_roi, ida, a, resolution, iter_max, phi_max, frame)
                         if (tth>=tth_min) and (tth<tth_max):
                             idx = <int>floor((tth - tth_min)/dtth)
                             norm_b[ida, idx] = norm_b[ida, idx] + nrm
-                            signal_b[ida, idx] = signal_b[ida, idx] + <float64_t> value
+                            for idp in range(npix):
+                                value = roicoll[frame, ida, idx_roi, idp]
+                                if value<65530:
+                                    signal_b[ida, idx, idp] = signal_b[ida, idx, idp] + value
         if self.do_debug:
             return numpy.asarray(tth_b), numpy.asarray(signal_b), numpy.asarray(norm_b), numpy.asarray(self.cycles)
         else:

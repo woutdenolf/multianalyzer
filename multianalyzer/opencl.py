@@ -78,6 +78,7 @@ class OclMultiAnalyzer:
                                                           ("num_crystal", self.NUM_CRYSTAL),
                                                           ("num_frame", None),
                                                           ("num_roi", numpy.uint32(512)),
+                                                          ("num_pix", numpy.uint32(1)),
                                                           ("num_bin", None),
                                                           ("L", self.L),
                                                           ("L2", self.L2),
@@ -116,6 +117,8 @@ class OclMultiAnalyzer:
                   tth_min,
                   tth_max,
                   dtth,
+                  nroi = 512,
+                  npix = 31,
                   phi_max=90.,
                   roi_min=0,
                   roi_max=512,
@@ -146,14 +149,13 @@ class OclMultiAnalyzer:
             
         do_debug = logger.getEffectiveLevel()<=logging.DEBUG
         nframes = arm.shape[0]
-        roicoll = numpy.ascontiguousarray(roicollection, dtype=numpy.int32).reshape((nframes, self.NUM_CRYSTAL, -1))
+        roicoll = numpy.ascontiguousarray(roicollection, dtype=numpy.int32).reshape((nframes, self.NUM_CRYSTAL, nroi, npix))
         mon = numpy.ascontiguousarray(mon, dtype=numpy.int32)
         tth_max += 0.5 * dtth
-        tth_b = numpy.arange(tth_min, tth_max + 0.4999999 * dtth, dtth)
+        tth_b = numpy.arange(tth_min, tth_max + (0.5-numpy.finfo("float64").eps) * dtth, dtth)
         tth_min -= 0.5 * dtth
         nbin = tth_b.size
         assert mon.shape[0] == arm.shape[0], "monitor array shape matches the one from arm array "
-        nroi = roicoll.shape[-1]
         
         arm = numpy.deg2rad(arm)
         try:
@@ -163,16 +165,17 @@ class OclMultiAnalyzer:
             max_frames = None
         logger.info(f"Allocate `out_norm` on device for {4*self.NUM_CRYSTAL*nbin/1e6}MB")
         self.buffers["out_norm"] = cla.empty(self.queue, (self.NUM_CRYSTAL, nbin), dtype=numpy.int32)
-        logger.info(f"Allocate `out_signal` on device for {4*self.NUM_CRYSTAL*nbin/1e6}MB")
-        self.buffers["out_signal"] = cla.empty(self.queue, (self.NUM_CRYSTAL, nbin), dtype=numpy.int32)
+        logger.info(f"Allocate `out_signal` on device for {4*self.NUM_CRYSTAL*nbin*npix/1e6}MB")
+        self.buffers["out_signal"] = cla.empty(self.queue, (self.NUM_CRYSTAL, nbin, npix), dtype=numpy.int32)
         evt = self.prg.memset(self.queue, (nbin, self.NUM_CRYSTAL), None, 
                               numpy.uint32(self.NUM_CRYSTAL),
                               numpy.uint32(nbin),
+                              numpy.uint32(npix),
                               self.buffers["out_norm"].data,
                               self.buffers["out_signal"].data)
         if max_frames:
-            logger.info(f"Allocate partial `roicoll` on device for {numpy.dtype(numpy.int32).itemsize*self.NUM_CRYSTAL*nroi*max_frames/1e6}MB")
-            self.buffers["roicoll"] = cla.empty(self.queue, (max_frames, self.NUM_CRYSTAL, nroi), dtype=numpy.int32)
+            logger.info(f"Allocate partial `roicoll` on device for {numpy.dtype(numpy.int32).itemsize*self.NUM_CRYSTAL*nroi*npix*max_frames/1e6}MB")
+            self.buffers["roicoll"] = cla.empty(self.queue, (max_frames, self.NUM_CRYSTAL, nroi, npix), dtype=numpy.int32)
             logger.info(f"Allocate partial  `mon` on device for {numpy.dtype(numpy.int32).itemsize*max_frames/1e6}MB")
             self.buffers["monitor"] = cla.empty(self.queue, (max_frames), dtype=numpy.int32)
             logger.info(f"Allocate partial  `arm` on device for {numpy.dtype(numpy.float64).itemsize*max_frames/1e6}MB")
@@ -192,6 +195,7 @@ class OclMultiAnalyzer:
         kwags["out_signal"] = self.buffers["out_signal"].data
         kwags["num_frame"] = numpy.uint32(max_frames if max_frames else nframes)
         kwags["num_roi"] = numpy.uint32(nroi)
+        kwags["num_pix"] = numpy.uint32(npix)
         kwags["num_bin"] = numpy.uint32(nbin)
         kwags["resolution"] = numpy.deg2rad(resolution*dtth)
         kwags["niter"] = numpy.int32(iter_max)
