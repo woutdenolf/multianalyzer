@@ -4,7 +4,7 @@
 ##cython: linetrace=True
 
 __author__ = "Jérôme KIEFFER"
-__date__  = "11/10/2022"
+__date__  = "14/10/2022"
 __copyright__ = "2021, ESRF, France"
 __licence__ = "MIT"
 
@@ -29,7 +29,7 @@ cdef class MultiAnalyzer:
 
     """
     cdef:
-        public int NUM_CRYSTAL, NUM_ROI, do_debug
+        public int NUM_CRYSTAL, NUM_ROW, do_debug
         public float64_t dr
         public float64_t L, L2, pixel, _tha, _thd, sin_tha, cot_tha, cos_thd
         public float64_t[::1] _center, _rollx, _rolly, _psi, cos_rx, sin_rx, cos_ry, sin_ry, _Lp, _Ln
@@ -38,7 +38,7 @@ cdef class MultiAnalyzer:
     def __cinit__(self, L, L2, pixel, center, tha, thd, psi, rollx, rolly):
         "Performes the initialization of the data"
         self.NUM_CRYSTAL = len(center)
-        self.NUM_ROI = 512
+        self.NUM_ROW = 512
         self.do_debug = logger.getEffectiveLevel()<=logging.DEBUG
         self.dr = pi/180.
         self._center = numpy.empty(self.NUM_CRYSTAL, dtype=numpy.float64) # position of the center, par analyzer
@@ -51,7 +51,7 @@ cdef class MultiAnalyzer:
         self.sin_ry = numpy.empty(self.NUM_CRYSTAL, dtype=numpy.float64)
         self._Ln = numpy.empty(self.NUM_CRYSTAL, dtype=numpy.float64)
         self._Lp = numpy.empty(self.NUM_CRYSTAL, dtype=numpy.float64)
-        self.cycles = numpy.empty((self.NUM_CRYSTAL, self.NUM_ROI, 1) , dtype=numpy.uint8)
+        self.cycles = numpy.empty((self.NUM_CRYSTAL, self.NUM_ROW, 1) , dtype=numpy.uint8)
         
     def __dealloc(self):
         self._center = None
@@ -513,8 +513,9 @@ cdef class MultiAnalyzer:
                   float64_t tth_min, 
                   float64_t tth_max, 
                   float64_t dtth, 
-                  int nroi = 512,
-                  int npix = 31,
+                  int num_row = 512,
+                  int num_col = 31,
+                  int order=0, #// 0: (column=31, channel=13, row=512), 1: (channel=13, column=31, row=512), 2: (channel=13, row=512, column=31)  
                   float64_t phi_max=90.,
                   int roi_min=0,
                   int roi_max=1024,
@@ -523,17 +524,20 @@ cdef class MultiAnalyzer:
                   float64_t resolution=1e-3,
                   width=0,
                   dtthw=None):
-        """Performess the integration of the ROIstack recorded at given angles on t
+        """Performs the integration of the ROIstack recorded at given angles on t
         
         :param roi_stack: stack of (nframes,NUM_CRYSTAL*numROI) with the recorded signal
         :param arm: 2theta position of the arm (in degrees)
         :param tth_min: start position of the histograms (in degrees)
         :param tth_max: End positon of the histogram (in degrees)
         :param dtth: bin size for the histogram (in degrees)
+        :param num_row: number of rows, usually 512
+        :param num_col: number of columns usially 31,
+        :param order: 0: (column=31, channel=13, row=512), 1: (channel=13, column=31, row=512), 2: (channel=13, row=512, column=31)  
         :param phi_max: discard data with |phi| larger than this value (in degree)
-        :param roi_min: first ROI to be considered
-        :param roi_max: Last ROI to be considered (excluded)
-        :param roi_step: consider ROIs stepwise
+        :param roi_min: first row to be considered
+        :param roi_max: Last row to be considered (excluded)
+        :param roi_step: consider rows stepwise
         :param iter_max: maximum number of iteration in the 2theta convergence
         :param resolution: precision of the 2theta convergence in fraction of dtth
         :param width: unsupported for now, only works on OpenCL
@@ -541,11 +545,17 @@ cdef class MultiAnalyzer:
         :return: center of bins, histogram of signal and histogram of normalization, cycles per data-point
         """
         cdef:
-            int nbin, idx_roi, frame, ida, idr, value, idx, idp, nframes = arm.shape[0]
+            int nbin, idx_row, frame, ida, idr, value, idx, idx_col, nframes = arm.shape[0]
             float64_t[:, ::1] norm_b
-            float64_t[:, :, :1] signal_b
-            double a, tth, nrm, sin_phi_max
-            int32_t[:, :, :, ::1] roicoll = numpy.ascontiguousarray(roicollection, dtype=numpy.int32).reshape((nframes, self.NUM_CRYSTAL, nroi, npix))
+            int32_t[:, :, ::1] signal_b
+            double a, tth, nrm
+            int32_t[:, :, :, ::1] roicoll
+        if order == 0:
+            roicoll = numpy.ascontiguousarray(roicollection, dtype=numpy.int32).reshape((nframes, num_col, self.NUM_CRYSTAL, num_row))
+        elif order == 1:
+            roicoll = numpy.ascontiguousarray(roicollection, dtype=numpy.int32).reshape((nframes, self.NUM_CRYSTAL, num_col, num_row))
+        elif order == 2:
+            roicoll = numpy.ascontiguousarray(roicollection, dtype=numpy.int32).reshape((nframes, self.NUM_CRYSTAL, num_row, num_col))
         
         if dtthw:
             logger.warning("Width/dtthw parameters are not supported in Cython implementation")
@@ -554,21 +564,20 @@ cdef class MultiAnalyzer:
         tth_min -= 0.5 * dtth
         nbin = tth_b.size
         norm_b = numpy.zeros((self.NUM_CRYSTAL, nbin), dtype=numpy.float64)
-        signal_b = numpy.zeros((self.NUM_CRYSTAL, nbin, npix), dtype=numpy.int32)
+        signal_b = numpy.zeros((self.NUM_CRYSTAL, nbin, num_col), dtype=numpy.int32)
         assert mon.shape[0] == arm.shape[0], "monitor array shape matches the one from arm array "        
                
         roi_min, roi_max = min(roi_min, roi_max), max(roi_min, roi_max)
         roi_min = max(roi_min, 0)
-        roi_max = min(roi_max, roicoll.shape[2])
+        roi_max = min(roi_max, num_row)
         # this is a work-around to https://github.com/cython/cython/issues/1106
         roi_step = abs(roi_step)
-        nroi = (roi_max-roi_min) // roi_step
+        num_row = (roi_max-roi_min) // roi_step
         
         if self.do_debug:
-            self.cycles = numpy.zeros((self.NUM_CRYSTAL, nroi, nframes), dtype=numpy.uint8)
+            self.cycles = numpy.zeros((self.NUM_CRYSTAL, num_row, nframes), dtype=numpy.uint8)
         
         #switch to radians:
-        sin_phi_max = sin(phi_max * self.dr)
         tth_min *= self.dr
         tth_max *= self.dr
         dtth *= self.dr
@@ -578,17 +587,22 @@ cdef class MultiAnalyzer:
                 for frame in range(nframes):
                     a = arm[frame]*self.dr
                     nrm = mon[frame]
-                    idx_roi = roi_min - roi_step
-                    for idr in range(nroi):
-                        idx_roi = idx_roi + roi_step
-                        tth = self._refine(idx_roi, ida, a, resolution, iter_max, phi_max, frame)
+                    idx_row = roi_min - roi_step
+                    for idr in range(num_row):
+                        idx_row = idx_row + roi_step
+                        tth = self._refine(idx_row, ida, a, resolution, iter_max, phi_max, frame)
                         if (tth>=tth_min) and (tth<tth_max):
                             idx = <int>floor((tth - tth_min)/dtth)
                             norm_b[ida, idx] = norm_b[ida, idx] + nrm
-                            for idp in range(npix):
-                                value = roicoll[frame, ida, idx_roi, idp]
+                            for idx_col in range(num_col):
+                                if order == 0:
+                                    value = roicoll[frame, idx_col, ida, idx_row]
+                                elif order == 1:
+                                    value = roicoll[frame, ida, idx_col, idx_row]
+                                elif order == 2:
+                                    value = roicoll[frame, ida, idx_row, idx_col]
                                 if value<65530:
-                                    signal_b[ida, idx, idp] = signal_b[ida, idx, idp] + value
+                                    signal_b[ida, idx, idx_col] = signal_b[ida, idx, idx_col] + value
         if self.do_debug:
             return numpy.asarray(tth_b), numpy.asarray(signal_b), numpy.asarray(norm_b), numpy.asarray(self.cycles)
         else:

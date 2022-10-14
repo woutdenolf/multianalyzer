@@ -1,17 +1,23 @@
+//Common type definnitions
+#define int8_t  char
+#define int32_t int
+#define uint32_t unsigned int
+#define uint8_t unsigned char
+
 // Memset output arrays
 kernel void memset(
-                uint num_crystal,       // numberof analyzer crystal
-                uint num_bin,           // number of bins 
-                uint num_pix,           // number of pixel in one ROI
-                global int *out_signal, // shape (num_analyzer, num_bin, num_pix)
-                global int *out_norm    // shape (num_analyzer, num_bin)            
+                uint32_t num_crystal,       // numberof analyzer crystal
+                uint32_t num_bin,           // number of bins 
+                uint32_t num_col,           // number of columns in one ROI
+                global int32_t *out_signal, // shape (num_analyzer, num_bin, num_col)
+                global int32_t *out_norm    // shape (num_analyzer, num_bin)            
                 ){
-    int bin = get_global_id(0);
-    int ida = get_global_id(1);
+    size_t bin = get_global_id(0);
+    size_t ida = get_global_id(1);
     if ((ida<num_crystal) && (bin<num_bin)){
-        int pos = ida*num_bin + bin;
+        size_t pos = ida*num_bin + bin;
         out_norm[pos] = 0;
-        for (int i=pos*num_pix;i<pos*(num_pix+1); i++)
+        for (size_t i=pos*num_col;i<pos*(num_col+1); i++)
             out_signal[i] = 0;
     }
 }
@@ -121,7 +127,7 @@ double2 refine_tth(
         global double *rollx, 
         global double *rolly,
         double resolution, 
-        int niter, 
+        int32_t niter, 
         double sin_phi_max)
 {
     size_t idr = get_global_id(0);
@@ -165,7 +171,7 @@ double2 refine_tth(
     double L3;
     double Ln = L*(sin(psi[ida]) - sin(psi[ida]-tha))/sin_tha; //Eq24
     double Lp = Ln*(cos_rx - sin_rx*sin_ry*cot_tha); //Eq26
-    uint i;
+    uint32_t i;
     for (i=0; i<niter; i++){
         L3 = calc_L3(L, L2, Lp, sin_tha, cos_thd, cos_rx, sin_rx, sin_ry, sin_arm_d, cos_arm_d, sin_arm_a_n, cos_arm_a_n, sin_tth, cos_tth, sin_phi, cos_phi);
         sin_phi = calc_sin_phi( Lp,  sin_tha,  sin_rx,  cos_ry,  zd,  L3,  sin_tth, sin_phi);
@@ -204,14 +210,15 @@ double2 refine_tth(
 
 
 kernel void  integrate(
-        global int *roicoll,
-        global int *monitor,
+        global int32_t *roicoll,
+        global int32_t *monitor,
         global double *d_arm,
-        uint num_crystal,
-        uint num_frame,
-        uint num_roi,
-        uint num_pix,
-        uint num_bin,
+        const uint32_t num_crystal,
+        const uint32_t num_frame,
+        const uint32_t num_row,
+        const uint32_t num_col,
+        const uint8_t columnorder, // 0: (column=31, channel=13, row=512), 1: (channel=13, column=31, row=512), 2: (channel=13, row=512, column=31)  
+        uint32_t num_bin,
         double L, 
         double L2, 
         double pixel, 
@@ -222,19 +229,19 @@ kernel void  integrate(
         global double *rollx, 
         global double *rolly,
         double resolution, 
-        int niter, 
+        int32_t niter, 
         double phi_max,
-        uint roi_min,
-        uint roi_max,
+        uint32_t roi_min,
+        uint32_t roi_max,
         double tth_min,
         double tth_max,
         double dtth,
-        int width, //in number of pixels
+        int32_t width, //in number of pixels
         double dtthw,
-        global int *out_signal,
-        global int *out_norm,
-        int do_debug,
-        global uchar *cycles,
+        global int32_t *out_signal,
+        global int32_t *out_norm,
+        int32_t do_debug,
+        global uint8_t *cycles,
         local double *cache
         ){
     
@@ -242,18 +249,18 @@ kernel void  integrate(
     size_t idf = get_global_id(1);
     size_t ida = get_global_id(2);
     
-    int c;
+    int32_t c;
     double tth = NAN;
     
     cache[idr] = tth;
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    uchar active_thread = ((idr<num_roi) || (idf<num_frame) || (ida<num_roi) );
+    uint8_t active_thread = ((idr<num_row) || (idf<num_frame) || (ida<num_crystal) );
     if (active_thread){    
         if ((idr>=roi_min) && (idr<roi_max)){   
             double2 tth2 = refine_tth(L, L2, pixel, d_arm, center, tha, thd, psi, rollx, rolly, resolution, niter, phi_max);
             tth = tth2.s0;
-            c = (int)tth2.s1;
+            c = (int32_t)tth2.s1;
         }
         else{
             c = 255;
@@ -263,8 +270,8 @@ kernel void  integrate(
     barrier(CLK_LOCAL_MEM_FENCE);
     
     if (width){
-        int start = max((int)0, (int)idr - width);
-        int stop = min((int)num_roi-1, (int)idr + width);
+        int32_t start = max((int32_t)0, (int32_t)idr - width);
+        int32_t stop = min((int32_t)num_row-1, (int32_t)idr + width);
         double delta = fabs(cache[start] - cache[stop]);
         if (!((2.0*width*delta)<((stop-start)*dtthw))){
             active_thread = 0;
@@ -273,20 +280,27 @@ kernel void  integrate(
         }
     }
     if (active_thread && (tth>=tth_min) && (tth<tth_max)){
-        int nrm = monitor[idf];
-        int idx = convert_int_rtn((tth - tth_min)/dtth);
+        int32_t nrm = monitor[idf];
+        int32_t idx = convert_int_rtn((tth - tth_min)/dtth);
         size_t pos = num_bin*ida + idx;
         atomic_add(&out_norm[pos], nrm);
-        size_t read_pos = ((idf*num_crystal + ida)*num_roi + idr) * num_pix;
-        size_t write_pos = pos*num_pix;
-        for (int pix=0; pix<num_pix; pix++){
-            atomic_add(&out_signal[write_pos+pix], roicoll[read_pos+pix]);
+        size_t read_pos 
+        size_t write_pos = pos*num_col;
+        for (int32_t col=0; col<num_col; col++){
+            if (columnorder==0){ //(frame, column=31, channel=13, row=512)  
+                read_pos = ((idf*num_col + col)*num_crystal + ida)*num_row + idr;
+            } else if (columnorder==1){ //frame, channel=13, column=31, row=512)  
+                read_pos = ((idf*num_crystal + ida)*num_col + col)*num_row + idr;
+            } else if (columnorder==2){ //frame, channel=13, row=512, column=31)  
+                read_pos = (idf*num_crystal + ida)*num_row + idr) * num_col + col;
+            }
+            atomic_add(&out_signal[write_pos+col], roicoll[read_pos]);
         }
         
     }
     
     if (do_debug){
-        cycles[(ida*num_roi + idr)*num_frame+idf] = c;
+        cycles[(ida*num_row + idr)*num_frame+idf] = c;
     }
     
 }

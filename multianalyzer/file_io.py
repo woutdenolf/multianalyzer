@@ -1,6 +1,6 @@
 __authors__ = ["Jérôme Kieffer"]
 __license__ = "MIT"
-__date__ = "20/05/2022"
+__date__ = "14/10/2022"
 
 import os
 import posixpath
@@ -485,18 +485,24 @@ def save_rebin(filename, beamline="id22", name="id22rebin", topas=None, res=None
                 topas_grp.create_dataset(k, data=v).attrs["unit"] = "rad"
 
         if res:
+            tth = res[0]
             data_grp = nxs.new_class(process_grp, "data", "NXdata")
-            tth_ds = data_grp.create_dataset("2th", data=res[0], **CMP)
+            tth_ds = data_grp.create_dataset("2th", data=tth, **CMP)
             tth_ds.attrs["unit"] = "deg"
             
-            sum_ds = data_grp.create_dataset("I_sum", data=res[1], **CMP)
+            I_sum = res[1]
+            sum_ds = data_grp.create_dataset("I_sum", data=I_sum, **CMP)
             sum_ds.attrs["interpretation"] = "spectrum"
-            norm_ds = data_grp.create_dataset("norm", data=res[2], **CMP)
+            norm = res[2]
+            norm_ds = data_grp.create_dataset("norm", data=norm, **CMP)
             norm_ds.attrs["interpretation"] = "spectrum"
             
-            scale = numpy.atleast_2d(numpy.median(res[2], axis=-1)).T
+            scale = numpy.atleast_2d(numpy.median(norm, axis=-1)).T
+            if I_sum.ndim>norm.ndim:
+                I_sum = I_sum.sum(axis=-1)
+            print(f"scale: {scale.shape}, I_sum: {I_sum.shape}, norm {norm.shape}")
             with numpy.errstate(divide='ignore', invalid='ignore'):
-                I = scale * res[1] / res[2]
+                I = scale * I_sum / norm
             Ima_ds = data_grp.create_dataset("I_MA", data=I , **CMP)
             Ima_ds.attrs["interpretation"] = "spectrum"
             
@@ -509,12 +515,12 @@ def save_rebin(filename, beamline="id22", name="id22rebin", topas=None, res=None
                 Ima_ds.attrs["axes"] = [".", "2th"]
                 
             if weights is None:
-                weights = numpy.ones(res[1].shape[0])
+                weights = numpy.ones(I_sum.shape[0])
             weights /= weights.sum() # normalize wights
             weights = numpy.atleast_2d(weights).T
             # print(weights.shape)
             # print(scale.shape)
-            I_avg =  (scale * weights * res[1]).sum(axis=0) / (weights*res[2]).sum(axis=0)
+            I_avg =  (weights * scale * I_sum).sum(axis=0) / (weights*norm).sum(axis=0)
             I_ds = data_grp.create_dataset("I_avg", data=I_avg , **CMP)
             I_ds.attrs["interpretation"] = "spectrum"
             I_ds.attrs["axes"] = ["2th"]

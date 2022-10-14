@@ -32,7 +32,7 @@ __author__ = "Jérôme Kieffer"
 __contact__ = "Jerome.Kieffer@ESRF.eu"
 __license__ = "MIT"
 __copyright__ = "European Synchrotron Radiation Facility, Grenoble, France"
-__date__ = "20/05/2022"
+__date__ = "14/10/2022"
 __status__ = "development"
 
 import os
@@ -97,7 +97,15 @@ def parse():
                         help="Wavelength of the incident beam (in Å). Default: use the one in `topas` file")
     optional.add_argument("-e", "--energy", type=float, default=None,
                         help="Energy of the incident beam (in keV). Replaces wavelength")
-
+    subparser = parser.add_argument_group('ROI layout in ROI-collection')
+    subparser.add_argument("--num-analyzer", dest="num_analyzer", type=int, default=13,
+                           help="Number of analyzer crystals (13)")
+    subparser.add_argument("--num-row", dest="num_row", type=int, default=512,
+                           help="Number of row in ROI-collection (512)")
+    subparser.add_argument("--num-col", dest="num_col", type=int, default=31,
+                           help="Number of columns in ROI-collection (31)")
+    subparser.add_argument("--order", type=int, default=0,
+                           help="Order of elements: 0:(col, analyzer, row), 1:(analyzer, col, row), 2: analyzer, row, col")
     subparser = parser.add_argument_group('Rebinning options')
     subparser.add_argument("-s", "--step", type=float, default=None,
                            help="Step size of the 2θ scale. Default: the step size of the scan of the arm")
@@ -106,11 +114,11 @@ def parse():
     subparser.add_argument("--phi", type=float, default=75,
                            help="φ_max: Maximum opening angle in azimuthal direction in degrees. Default: 75°")
     subparser.add_argument("--iter", type=int, default=250,
-                           help="Maximum number of iteration for the 2theta convergence loop, default:100")
+                           help="Maximum number of iteration for the 2theta convergence loop, default:250")
     subparser.add_argument("--startp", type=int, default=0,
-                           help="Starting pixel on the detector, default:0")
+                           help="Starting row on the detector, default:0")
     subparser.add_argument("--endp", type=int, default=1024,
-                           help="End pixel on the detector to be considered, default:1024")
+                           help="End row on the detector to be considered, default:1024")
     subparser.add_argument("--pixel", type=float, default=75e-3,
                            help="Size of the pixel, default: 75e-3 mm")
     subparser.add_argument("--width", type=float, default=0.0,
@@ -132,7 +140,8 @@ def parse():
 
 
 def rebin_result_generator(filename=None, entries=None, hdf5_data=None, output=None, timer=None, pars=None, device=None, debug=None, energy=None, wavelength=None,
-               pixel=None, step=None, range=None, phi=None, width=None, delta2theta=None, iter=None, startp=None, endp=None):
+               pixel=None, step=None, range=None, phi=None, width=None, delta2theta=None, iter=None, startp=None, endp=None, 
+               num_analyzer=None, num_row=512, num_col=1, order=0):
     if not pars:
         raise ValueError("'pars' parameter is missing")
     if pixel is None:
@@ -176,7 +185,10 @@ def rebin_result_generator(filename=None, entries=None, hdf5_data=None, output=N
     # thd = hdf5_data["thd"]
     tha = numpy.rad2deg(param["manom"])
     thd = numpy.rad2deg(param["mantth"])
-
+    
+    if num_analyzer:
+        assert num_analyzer== len(center)
+        
     # Finally initialize the rebinning engine.
     if device and OclMultiAnalyzer:
         mma = OclMultiAnalyzer(L, L2, pixel, center, tha, thd, psi, rollx, rolly, device=device.split(","))
@@ -219,11 +231,14 @@ def rebin_result_generator(filename=None, entries=None, hdf5_data=None, output=N
             res = mma.integrate(roicol,
                                 arm,
                                 mon,
-                                tth_min, tth_max, dtth=dtth,
+                                tth_min, tth_max, dtth=dtth,                                
                                 iter_max=iter,
                                 roi_min=startp,
                                 roi_max=endp,
                                 phi_max=phi,
+                                num_row=num_row,
+                                num_col=num_col,
+                                order=order, #// 0: (column=31, channel=13, row=512), 1: (channel=13, column=31, row=512), 2: (channel=13, row=512, column=31)  
                                 width=width or param.get("wg", 0.0),
                                 dtthw=delta2theta)
 
