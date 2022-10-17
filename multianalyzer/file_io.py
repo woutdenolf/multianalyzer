@@ -158,7 +158,6 @@ def ID22_bliss_parser(infile, entries=None, exclude_entries=None, block_size=Non
 
 class RoiColReader(threading.Thread):
     "Reader for several RoiCollection, when they do not fit into memory"
-    read_time = 0.0
 
     def __init__(self, roicol_lst, data_q=None, quit=None, timer=None):
         """Read and enqueue (BlockDescription, data) into the provided queue.
@@ -174,8 +173,7 @@ class RoiColReader(threading.Thread):
         self.quit = threading.Event() if quit is None else quit
         self.timer = timer if timer is None else nullcontext()
 
-    @classmethod
-    def read_block(cls, block):
+    def read_block(self, block):
         "Read and return the described block of data"
         assert isinstance(block, BlockDescription)
         logger.info(f"Reading {block}")
