@@ -51,6 +51,3 @@ class Timer():
         dt = t1 - t0
         self.rt_rebin += dt
         logger.info(f"Rebinning time: {dt:.3f}s")
-
-    def extra_read(self, value):
-        self.rt_read += value
