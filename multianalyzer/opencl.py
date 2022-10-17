@@ -372,7 +372,7 @@ class OclMultiAnalyzer:
         self.buffers["monitor"].set(sub_mon)
         self.buffers["arm"].set(sub_arm)
 
-        kwags["num_frame"] = stop - start
+        kwags["num_frame"] = numpy.uint32(stop - start)
         num_row = int(kwags["num_row"])
         logger.debug("Process frames %i to %i out of %i", start, stop, len(self.arm))
         for k, v in kwags.items():
