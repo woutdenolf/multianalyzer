@@ -231,8 +231,8 @@ def rebin_result_generator(filename=None, entries=None, hdf5_data=None, output=N
         if "roicol" not in hdf5_data[entry]:
             to_read += hdf5_data[entry]["roicol_lst"]
         to_process.append(entry)
-    if to_process:
-        reader = RoiColReader(to_process, queue, abort, timer)
+    if to_read:
+        reader = RoiColReader(to_read, queue, abort, timer)
         reader.start()
     else:
         reader = None
