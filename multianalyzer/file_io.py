@@ -165,13 +165,13 @@ class RoiColReader(threading.Thread):
         :param roicol_lst: list of BlockDescription
         :param data_q: queue where to put read data
         :param quit: quit-event
-        :param Context-manager timer
+        :param timer: unarmed Context-manager timer
         """
         super().__init__(name="RoiColReader")
         self.roicol_lst = roicol_lst
         self.queue = queue.Queue() if data_q is None else data_q
         self.quit = threading.Event() if quit is None else quit
-        self.timer = timer if timer is None else nullcontext
+        self.timer = nullcontext if timer is None else timer
 
     def read_block(self, block):
         "Read and return the described block of data"

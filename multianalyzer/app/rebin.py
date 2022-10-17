@@ -164,7 +164,7 @@ def parse():
 
 def rebin_result_generator(filename=None, entries=None, hdf5_data=None, output=None, timer=None, pars=None, device=None, debug=None, energy=None, wavelength=None,
                pixel=None, step=None, range=None, phi=None, width=None, delta2theta=None, iter=None, startp=None, endp=None,
-               num_analyzer=None, num_row=512, num_col=1, order=0):
+               num_analyzer=None, num_row=512, num_col=1, order=0, info=None):
     if not pars:
         raise ValueError("'pars' parameter is missing")
     if pixel is None:
