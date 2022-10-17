@@ -62,6 +62,9 @@ class OclMultiAnalyzer:
 
         # Used only during multi-pass integration
         self.tth_b = None
+        self.shape = None
+        self.arm = None
+        self.mon = None
 
     def allocate_buffers(self):
         self.buffers["roicoll"] = None
@@ -118,6 +121,14 @@ class OclMultiAnalyzer:
         "return maximum allocation size for a single array"
         return self.ctx.devices[0].max_mem_alloc_size
 
+    def set_shape(self, columnorder, nframes, num_col, num_row, **kw):
+        if columnorder == 0:
+            self.shape = (nframes, num_col, self.NUM_CRYSTAL, num_row)
+        elif columnorder == 1:
+            self.shape = (nframes, self.NUM_CRYSTAL, num_col, num_row)
+        elif columnorder == 2:
+            self.shape = (nframes, self.NUM_CRYSTAL, num_row, num_col)
+
     def integrate(self,
                   roicollection,
                   arm,
@@ -158,7 +169,8 @@ class OclMultiAnalyzer:
 
         do_debug = logger.getEffectiveLevel() <= logging.DEBUG
         nframes = arm.shape[0]
-        roicoll = numpy.ascontiguousarray(roicollection, dtype=numpy.int32).reshape((nframes, self.NUM_CRYSTAL, num_row, num_col))
+        shape = self.set_shape(columnorder, nframes, num_col, num_row)
+        roicoll = numpy.ascontiguousarray(roicollection, dtype=numpy.int32).reshape(shape)
         mon = numpy.ascontiguousarray(mon, dtype=numpy.int32)
         tth_max += 0.5 * dtth
         tth_b = numpy.arange(tth_min, tth_max + (0.5 - numpy.finfo("float64").eps) * dtth, dtth)
@@ -183,8 +195,9 @@ class OclMultiAnalyzer:
                               self.buffers["out_signal"].data,
                               self.buffers["out_norm"].data)
         if max_frames:
+            shape = self.set_shape(columnorder, max_frames, num_col, num_row)
             logger.info(f"Allocate partial `roicoll` on device for {numpy.dtype(numpy.int32).itemsize*self.NUM_CRYSTAL*num_row*num_col*max_frames/1e6}MB")
-            self.buffers["roicoll"] = cla.empty(self.queue, (max_frames, self.NUM_CRYSTAL, num_row, num_col), dtype=numpy.int32)
+            self.buffers["roicoll"] = cla.empty(self.queue, shape, dtype=numpy.int32)
             logger.info(f"Allocate partial  `mon` on device for {numpy.dtype(numpy.int32).itemsize*max_frames/1e6}MB")
             self.buffers["monitor"] = cla.empty(self.queue, (max_frames), dtype=numpy.int32)
             logger.info(f"Allocate partial  `arm` on device for {numpy.dtype(numpy.float64).itemsize*max_frames/1e6}MB")
@@ -247,7 +260,7 @@ class OclMultiAnalyzer:
                     sub_mon = mon[start:stop]
                 else:
                     stop = nframes
-                    sub_roicol = numpy.empty((max_frames, self.NUM_CRYSTAL, num_row), dtype=numpy.int32)
+                    sub_roicol = numpy.empty(shape, dtype=numpy.int32)
                     sub_roicol[:stop - start, ...] = roicoll[start:stop, ...]
                     sub_arm = numpy.empty((max_frames), dtype=numpy.float64)
                     sub_arm[:stop - start] = arm[start:stop]
@@ -305,6 +318,7 @@ class OclMultiAnalyzer:
         :param dtthw: Minimum precision expected for ROI being `width` appart, by default dtth
         :return: nothing.
         """
+        shape = self.set_shape(columnorder, max_frames, num_col, num_row)
 
         if roi_step and roi_step != 1:
             logger.warning("only roi_step=1 is supported in OpenCL")
@@ -328,7 +342,7 @@ class OclMultiAnalyzer:
                               self.buffers["out_signal"].data,
                               self.buffers["out_norm"].data)
         logger.info(f"Allocate partial `roicoll` on device for {numpy.dtype(numpy.int32).itemsize*self.NUM_CRYSTAL*num_row*num_col*max_frames/1e6:.3f} MB")
-        self.buffers["roicoll"] = cla.empty(self.queue, (max_frames, self.NUM_CRYSTAL, num_row, num_col), dtype=numpy.int32)
+        self.buffers["roicoll"] = cla.empty(self.queue, shape, dtype=numpy.int32)
         logger.info(f"Allocate partial  `mon` on device for {numpy.dtype(numpy.int32).itemsize*max_frames/1e6:.3f} MB")
         self.buffers["monitor"] = cla.empty(self.queue, (max_frames), dtype=numpy.int32)
         logger.info(f"Allocate partial  `arm` on device for {numpy.dtype(numpy.float64).itemsize*max_frames/1e6:.3f} MB")
@@ -363,12 +377,24 @@ class OclMultiAnalyzer:
     def partial_integate(self, roicol_description, roicol_data):
         start = roicol_description.start
         stop = roicol_description.stop
-        sub_arm = self.arm[start:stop]
-        sub_mon = self.mon[start:stop]
         kwags = self.kernel_arguments["integrate"]
         num_row = kwags["num_row"]
         num_col = kwags["num_col"]
-        self.buffers["roicoll"].set(numpy.ascontiguousarray(roicol_data, numpy.int32).reshape((-1, self.NUM_CRYSTAL, num_row, num_col)))
+        max_frames = kwags["num_frame"]
+        roicol = numpy.ascontiguousarray(roicol_data, numpy.int32).reshape((-1,) + self.shape[1:])
+        if stop - start == max_frames:
+            sub_arm = self.arm[start:stop]
+            sub_mon = self.mon[start:stop]
+            sub_roicol = roicol
+        else:
+            sub_roicol = numpy.empty(self.shape, dtype=numpy.int32)
+            sub_roicol[:stop - start, ...] = roicol[:stop - start, ...]
+            sub_arm = numpy.empty((max_frames), dtype=numpy.float64)
+            sub_arm[:stop - start] = self.arm[start:stop]
+            sub_mon = numpy.empty((max_frames), dtype=numpy.int32)
+            sub_mon[:stop - start] = self.mon[start:stop]
+
+        self.buffers["roicoll"].set(sub_roicol)
         self.buffers["monitor"].set(sub_mon)
         self.buffers["arm"].set(sub_arm)
 
@@ -388,3 +414,4 @@ class OclMultiAnalyzer:
         self.tth_b = None
         self.arm = None
         self.mon = None
+        self.shape = None
