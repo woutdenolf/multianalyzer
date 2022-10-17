@@ -1,12 +1,16 @@
 __authors__ = ["Jérôme Kieffer"]
 __license__ = "MIT"
-__date__ = "14/10/2022"
+__date__ = "17/10/2022"
 
 import os
 import posixpath
 import sys
 import time
 import numpy
+from collections import namedtuple
+import threading
+import queue
+from contextlib import nullcontext
 import logging
 logger = logging.getLogger(__name__)
 try:
@@ -30,6 +34,10 @@ else:
 
 from . import version
 
+BlockDescription = namedtuple("BlockDescription", "filename dataset start stop")
+BlockRead = namedtuple("BlockRead", "description data")
+TOTAL_MEM = os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES')
+
 
 def topas_parser(infile):
     """Parser for TOPAS output file with geometry of the multianalyzer
@@ -50,14 +58,14 @@ def topas_parser(infile):
                 lkeys = words
                 line = f.readline()
                 words = line.split()
-                for k,v in zip(lkeys, words):
+                for k, v in zip(lkeys, words):
                     res[k] = float(v)
             if words[:2] == ["L1", "L2"]:
                 line = f.readline()
                 words = line.split()
                 res["L1"] = float(words[0])
                 res["L2"] = float(words[1])
-            if len(words)>=len(keys) and words[:len(keys)] == keys:
+            if len(words) >= len(keys) and words[:len(keys)] == keys:
                 keys = words
                 for k in keys:
                     res[k] = []
@@ -84,6 +92,7 @@ def ID22_bliss_parser(infile, entries=None, exclude_entries=None):
         * arm: the position of the 2theta arm when collecting 
     """
     res = {}
+    used_memory = 0
     with Nexus(infile, "r") as nxs:
         if entries:
             entries = set(entries)
@@ -92,10 +101,11 @@ def ID22_bliss_parser(infile, entries=None, exclude_entries=None):
         if exclude_entries:
             entries -= set(exclude_entries)
         entries = sorted(entries)
+
         for entry in entries:
             if not entry.endswith(".1"):
                 continue
-            title = entry+"/title"
+            title = entry + "/title"
             if title not in nxs.h5:
                 continue
             title = nxs.h5[title][()]
@@ -108,15 +118,75 @@ def ID22_bliss_parser(infile, entries=None, exclude_entries=None):
             entry_dict = {}
             try:
                 entry_grp = nxs.h5[entry]
-                entry_dict["roicol"] = entry_grp["measurement/eiger_roi_collection"][()]
-                entry_dict["arm"] = entry_grp["measurement/tth"][()]
-                entry_dict["mon"] = entry_grp["measurement/mon"][()]
+                roicol = entry_grp["measurement/eiger_roi_collection"]
+                arm = entry_grp["measurement/tth"]
+                mon = entry_grp["measurement/mon"]
+                kept_points = min(len(roicol), len(arm), len(mon))
+                entry_dict["arm"] = arm[:kept_points]
+                entry_dict["mon"] = mon[:kept_points]
+                frame_size = numpy.prod(roicol.shape[1:])
+                ds_size = kept_points * frame_size * roicol.dtype.itemsize
+                used_memory += ds_size
+                nframes = TOTAL_MEM // (4 * roicol.dtype.itemsize * frame_size)
+                entry_dict["roicol_lst"] = [BlockDescription(nxs.h5.filename, roicol.name, start, min(start + nframes, kept_points))
+                                            for start in range(0, kept_points, nframes)]
+                if 2 * used_memory < TOTAL_MEM:
+                    "This could be discarded later on"
+                    entry_dict["roicol"] = entry_grp["measurement/eiger_roi_collection"][:kept_points]
+
                 entry_dict["tha"] = entry_grp["instrument/positioners/manom"][()]
                 entry_dict["thd"] = entry_grp["instrument/positioners/mantth"][()]
             except KeyError:
                 continue
             res[entry] = entry_dict
+    if 2 * used_memory < TOTAL_MEM:
+        "small dataset"
+        for entry in res.values():
+            entry.pop("roicol_lst")
+    else:
+        "large dataset"
+        for entry in res.values():
+            if "roicol" in entry:
+                entry.pop("roicol")
     return res
+
+
+class RoiColReader(threading.Thread):
+    "Reader for several RoiCollection, when they do not fit into memory"
+    read_time = 0.0
+
+    def __init__(self, roicol_lst, data_q=None, quit=None, timer=None):
+        """Read and enqueue (BlockDescription, data) into the provided queue.
+        
+        :param roicol_lst: list of BlockDescription
+        :param data_q: queue where to put read data
+        :param quit: quit-event
+        :param Context-manager timer
+        """
+        super().__init__(name="RoiColReader")
+        self.roicol_lst = roicol_lst
+        self.queue = queue.Queue() if data_q is None else data_q
+        self.quit = threading.Event() if quit is None else quit
+        self.timer = timer if timer is None else nullcontext()
+
+    @classmethod
+    def read_block(cls, block):
+        "Read and return the described block of data"
+        assert isinstance(block, BlockDescription)
+        logger.info(f"Reading {block}")
+        with self.timer:
+            with h5py.File(block.filename, "r") as h:
+                data = h[block.dataset][block.start:block.stop]
+        return data
+
+    def run(self):
+        for block in self.roicol_lst:
+            if self.queue.empty():
+                self.queue.put(BlockRead(block, self.read_block(block)))
+            else:
+                if self.quit.is_set():
+                    return
+                time.sleep(1.0)
 
 
 def get_isotime(forceTime=None):
@@ -468,9 +538,9 @@ def save_rebin(filename, beamline="id22", name="id22rebin", topas=None, res=None
         os.makedirs(dirname, exist_ok=True)
     weights = None
     with  Nexus(filename, mode="a", creator=name) as nxs:
-        entry = nxs.new_entry(entry=entry, program_name=name, 
-                              title=None, force_time=start_time, 
-                              force_name=entry!="entry")
+        entry = nxs.new_entry(entry=entry, program_name=name,
+                              title=None, force_time=start_time,
+                              force_name=entry != "entry")
         process_grp = nxs.new_class(entry, "id22rebin", class_type="NXprocess")
         process_grp["program"] = name
         process_grp["sequence_index"] = 1
@@ -489,23 +559,23 @@ def save_rebin(filename, beamline="id22", name="id22rebin", topas=None, res=None
             data_grp = nxs.new_class(process_grp, "data", "NXdata")
             tth_ds = data_grp.create_dataset("2th", data=tth, **CMP)
             tth_ds.attrs["unit"] = "deg"
-            
+
             I_sum = res[1]
             sum_ds = data_grp.create_dataset("I_sum", data=I_sum, **CMP)
             sum_ds.attrs["interpretation"] = "spectrum"
             norm = res[2]
             norm_ds = data_grp.create_dataset("norm", data=norm, **CMP)
             norm_ds.attrs["interpretation"] = "spectrum"
-            
+
             scale = numpy.atleast_2d(numpy.median(norm, axis=-1)).T
-            if I_sum.ndim>norm.ndim:
+            if I_sum.ndim > norm.ndim:
                 I_sum = I_sum.sum(axis=-1)
             print(f"scale: {scale.shape}, I_sum: {I_sum.shape}, norm {norm.shape}")
             with numpy.errstate(divide='ignore', invalid='ignore'):
                 I = scale * I_sum / norm
             Ima_ds = data_grp.create_dataset("I_MA", data=I , **CMP)
             Ima_ds.attrs["interpretation"] = "spectrum"
-            
+
             if topas:
                 Ima_ds.attrs["axes"] = ["offset", "2th"]
                 offset_ds = data_grp.create_dataset("offset", data=numpy.rad2deg(topas["offset"]))
@@ -513,19 +583,19 @@ def save_rebin(filename, beamline="id22", name="id22rebin", topas=None, res=None
                 weights = numpy.array(topas.get("scale"))
             else:
                 Ima_ds.attrs["axes"] = [".", "2th"]
-                
+
             if weights is None:
                 weights = numpy.ones(I_sum.shape[0])
-            weights /= weights.sum() # normalize wights
+            weights /= weights.sum()  # normalize wights
             weights = numpy.atleast_2d(weights).T
             # print(weights.shape)
             # print(scale.shape)
-            I_avg =  (weights * scale * I_sum).sum(axis=0) / (weights*norm).sum(axis=0)
+            I_avg = (weights * scale * I_sum).sum(axis=0) / (weights * norm).sum(axis=0)
             I_ds = data_grp.create_dataset("I_avg", data=I_avg , **CMP)
             I_ds.attrs["interpretation"] = "spectrum"
             I_ds.attrs["axes"] = ["2th"]
-            #TODO: perform uncertainty proagation using https://en.wikipedia.org/wiki/Weighted_arithmetic_mean
-            
+            # TODO: perform uncertainty proagation using https://en.wikipedia.org/wiki/Weighted_arithmetic_mean
+
             data_grp.attrs["signal"] = posixpath.basename(I_ds.name)
             entry.attrs["default"] = data_grp.name
             if len(res) >= 4:
