@@ -403,8 +403,8 @@ class OclMultiAnalyzer:
         kwags["num_frame"] = numpy.uint32(stop - start)
         num_row = int(kwags["num_row"])
         logger.debug("Process frames %i to %i out of %i", start, stop, len(self.arm))
-        for k, v in kwags.items():
-            print(k, v)
+        # for k, v in kwags.items():
+        #     print(k, v)
         evt = self.prg.integrate(self.queue, (num_row, stop - start, self.NUM_CRYSTAL), (num_row, 1, 1), *kwags.values())
         evt.wait()
 

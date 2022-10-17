@@ -184,12 +184,11 @@ class RoiColReader(threading.Thread):
 
     def run(self):
         for block in self.roicol_lst:
-            if self.queue.empty():
-                self.queue.put(BlockRead(block, self.read_block(block)))
-            else:
-                if self.quit.is_set():
-                    return
-                time.sleep(1.0)
+            while not self.queue.empty():
+                time.sleep(0.1)
+            self.queue.put(BlockRead(block, self.read_block(block)))
+            if self.quit.is_set():
+                return
 
 
 def get_isotime(forceTime=None):
