@@ -133,7 +133,7 @@ def ID22_bliss_parser(infile, entries=None, exclude_entries=None, block_size=Non
                 ds_size = kept_points * frame_size * roicol.dtype.itemsize
                 used_memory += ds_size
                 nframes = block_size // (roicol.dtype.itemsize * frame_size)
-                entry_dict["roicol_lst"] = [BlockDescription(nxs.h5.filename, roicol.name, start, min(start + nframes, kept_points))
+                entry_dict["roicol_lst"] = [BlockDescription(infile, roicol.name, start, min(start + nframes, kept_points))
                                             for start in range(0, kept_points, nframes)]
                 if used_memory < 2 * block_size:
                     "This could be discarded later on"
@@ -178,8 +178,8 @@ class RoiColReader(threading.Thread):
         assert isinstance(block, BlockDescription)
         logger.info(f"Reading {block}")
         with self.timer:
-            with h5py.File(block.filename, "r") as h:
-                data = h[block.dataset][block.start:block.stop]
+            with Nexus(block.filename, "r") as nxs:
+                data = nxs.h5[block.dataset][block.start:block.stop]
         return data
 
     def run(self):
