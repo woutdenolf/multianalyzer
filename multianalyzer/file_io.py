@@ -171,13 +171,13 @@ class RoiColReader(threading.Thread):
         self.roicol_lst = roicol_lst
         self.queue = queue.Queue() if data_q is None else data_q
         self.quit = threading.Event() if quit is None else quit
-        self.timer = timer if timer is None else nullcontext()
+        self.timer = timer if timer is None else nullcontext
 
     def read_block(self, block):
         "Read and return the described block of data"
         assert isinstance(block, BlockDescription)
         logger.info(f"Reading {block}")
-        with self.timer:
+        with self.timer():
             with Nexus(block.filename, "r") as nxs:
                 data = nxs.h5[block.dataset][block.start:block.stop]
         return data
