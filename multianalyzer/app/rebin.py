@@ -110,6 +110,9 @@ def parse():
     optional.add_argument("-d", "--debug",
                         action="store_true", dest="debug", default=False,
                         help="switch to verbose/debug mode")
+    optional.add_argument("--info",
+                        action="store_true", dest="info", default=False,
+                        help="switch to info mode, slightly verbose but less than debug")
     optional.add_argument("-w", "--wavelength", type=float, default=None,
                         help="Wavelength of the incident beam (in Å). Default: use the one in `topas` file")
     optional.add_argument("-e", "--energy", type=float, default=None,
@@ -152,6 +155,9 @@ def parse():
     if options.debug:
         logger.setLevel(logging.DEBUG)
         logging.root.setLevel(level=logging.DEBUG)
+    elif options.info:
+        logger.setLevel(logging.INFO)
+        logging.root.setLevel(level=logging.INFO)
 
     return options
 
