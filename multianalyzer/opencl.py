@@ -363,14 +363,15 @@ class OclMultiAnalyzer:
     def partial_integate(self, roicol_description, roicol_data):
         start = roicol_description.start
         stop = roicol_description.stop
-
         sub_arm = self.arm[start:stop]
         sub_mon = self.mon[start:stop]
-
-        self.buffers["roicoll"].set(numpy.ascontiguousarray(roicol_data, numpy.int32))
+        kwags = self.kernel_arguments["integrate"]
+        num_row = kwags["num_row"]
+        num_col = kwags["num_col"]
+        self.buffers["roicoll"].set(numpy.ascontiguousarray(roicol_data, numpy.int32).reshape((-1, self.NUM_CRYSTAL, num_row, num_col)))
         self.buffers["monitor"].set(sub_mon)
         self.buffers["arm"].set(sub_arm)
-        kwags = self.kernel_arguments["integrate"]
+
         kwags["num_frame"] = stop - start
         num_row = int(kwags["num_row"])
         logger.debug("Process frames %i to %i out of %i", start, stop, len(self.arm))
