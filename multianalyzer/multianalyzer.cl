@@ -292,7 +292,7 @@ kernel void  integrate(
             } else if (columnorder==1){ //frame, channel=13, column=31, row=512)  
                 read_pos = ((idf*num_crystal + ida)*num_col + col)*num_row + idr;
             } else if (columnorder==2){ //frame, channel=13, row=512, column=31)  
-                read_pos = (idf*num_crystal + ida)*num_row + idr) * num_col + col;
+                read_pos = ((idf*num_crystal + ida)*num_row + idr) * num_col + col;
             }
             atomic_add(&out_signal[write_pos+col], roicoll[read_pos]);
         }
