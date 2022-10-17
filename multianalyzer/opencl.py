@@ -309,8 +309,6 @@ class OclMultiAnalyzer:
         if roi_step and roi_step != 1:
             logger.warning("only roi_step=1 is supported in OpenCL")
         dtthw = dtthw or dtth
-
-        nframes = arm.shape[0]
         self.mon = mon = numpy.ascontiguousarray(mon, dtype=numpy.int32)
         tth_max += 0.5 * dtth
         self.tth_b = tth_b = numpy.arange(tth_min, tth_max + (0.5 - numpy.finfo("float64").eps) * dtth, dtth)
@@ -341,7 +339,7 @@ class OclMultiAnalyzer:
         kwags["arm"] = self.buffers["arm"].data
         kwags["out_norm"] = self.buffers["out_norm"].data
         kwags["out_signal"] = self.buffers["out_signal"].data
-        kwags["num_frame"] = numpy.uint32(max_frames if max_frames else nframes)
+        kwags["num_frame"] = numpy.uint32(max_frames)
         kwags["num_row"] = numpy.uint32(num_row)
         kwags["num_col"] = numpy.uint32(num_col)
         kwags["columnorder"] = numpy.uint8(columnorder)
@@ -365,6 +363,7 @@ class OclMultiAnalyzer:
     def partial_integate(self, roicol_description, roicol_data):
         start = roicol_description.start
         stop = roicol_description.stop
+
         sub_arm = self.arm[start:stop]
         sub_mon = self.mon[start:stop]
 
@@ -372,7 +371,12 @@ class OclMultiAnalyzer:
         self.buffers["monitor"].set(sub_mon)
         self.buffers["arm"].set(sub_arm)
         kwags = self.kernel_arguments["integrate"]
+        kwags["num_frame"] = stop - start
         num_row = int(kwags["num_row"])
+        logger.debug("Process frames %i to %i out of %i", start, stop, len(self.arm))
+        for k, v in kwags.items:
+            print(k, v)
+        print()
         evt = self.prg.integrate(self.queue, (num_row, stop - start, self.NUM_CRYSTAL), (num_row, 1, 1), *kwags.values())
         evt.wait()
 
