@@ -4,7 +4,7 @@
 ##cython: linetrace=True
 
 __author__ = "Jérôme KIEFFER"
-__date__  = "14/10/2022"
+__date__  = "17/10/2022"
 __copyright__ = "2021, ESRF, France"
 __licence__ = "MIT"
 
@@ -515,7 +515,7 @@ cdef class MultiAnalyzer:
                   float64_t dtth, 
                   int num_row = 512,
                   int num_col = 31,
-                  int order=0, #// 0: (column=31, channel=13, row=512), 1: (channel=13, column=31, row=512), 2: (channel=13, row=512, column=31)  
+                  int columnorder=0, #// 0: (column=31, channel=13, row=512), 1: (channel=13, column=31, row=512), 2: (channel=13, row=512, column=31)  
                   float64_t phi_max=90.,
                   int roi_min=0,
                   int roi_max=1024,
@@ -533,7 +533,7 @@ cdef class MultiAnalyzer:
         :param dtth: bin size for the histogram (in degrees)
         :param num_row: number of rows, usually 512
         :param num_col: number of columns usially 31,
-        :param order: 0: (column=31, channel=13, row=512), 1: (channel=13, column=31, row=512), 2: (channel=13, row=512, column=31)  
+        :param columnorder: 0: (column=31, channel=13, row=512), 1: (channel=13, column=31, row=512), 2: (channel=13, row=512, column=31)  
         :param phi_max: discard data with |phi| larger than this value (in degree)
         :param roi_min: first row to be considered
         :param roi_max: Last row to be considered (excluded)
@@ -550,11 +550,11 @@ cdef class MultiAnalyzer:
             int32_t[:, :, ::1] signal_b
             double a, tth, nrm
             int32_t[:, :, :, ::1] roicoll
-        if order == 0:
+        if columnorder == 0:
             roicoll = numpy.ascontiguousarray(roicollection, dtype=numpy.int32).reshape((nframes, num_col, self.NUM_CRYSTAL, num_row))
-        elif order == 1:
+        elif columnorder == 1:
             roicoll = numpy.ascontiguousarray(roicollection, dtype=numpy.int32).reshape((nframes, self.NUM_CRYSTAL, num_col, num_row))
-        elif order == 2:
+        elif columnorder == 2:
             roicoll = numpy.ascontiguousarray(roicollection, dtype=numpy.int32).reshape((nframes, self.NUM_CRYSTAL, num_row, num_col))
         
         if dtthw:
@@ -595,11 +595,11 @@ cdef class MultiAnalyzer:
                             idx = <int>floor((tth - tth_min)/dtth)
                             norm_b[ida, idx] = norm_b[ida, idx] + nrm
                             for idx_col in range(num_col):
-                                if order == 0:
+                                if columnorder == 0:
                                     value = roicoll[frame, idx_col, ida, idx_row]
-                                elif order == 1:
+                                elif columnorder == 1:
                                     value = roicoll[frame, ida, idx_col, idx_row]
-                                elif order == 2:
+                                elif columnorder == 2:
                                     value = roicoll[frame, ida, idx_row, idx_col]
                                 if value<65530:
                                     signal_b[ida, idx, idx_col] = signal_b[ida, idx, idx_col] + value
@@ -607,3 +607,14 @@ cdef class MultiAnalyzer:
             return numpy.asarray(tth_b), numpy.asarray(signal_b), numpy.asarray(norm_b), numpy.asarray(self.cycles)
         else:
             return numpy.asarray(tth_b), numpy.asarray(signal_b), numpy.asarray(norm_b)
+
+#----------------------------------------------- 
+#    Multi pass implementation
+#-----------------------------------------------
+    def init_integrate(self):
+        pass
+    def partial_integate(self):
+        pass
+    def reset(self):
+        "reset the integrator and zeros out all arrays"
+        pass

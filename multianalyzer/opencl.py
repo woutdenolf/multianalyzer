@@ -50,7 +50,7 @@ class OclMultiAnalyzer:
             self.ctx = pyopencl.create_some_context(answers=[str(i) for i in device])
         else:
             self.ctx = pyopencl.create_some_context(interactive=True)
-        
+
         self.queue = pyopencl.CommandQueue(self.ctx)
         self.kernel_arguments = OrderedDict()
         self.buffers = {}
@@ -59,6 +59,9 @@ class OclMultiAnalyzer:
         self.allocate_buffers()
         self.set_kernel_arguments()
         self.compile_kernel()
+
+        # Used only during multi-pass integration
+        self.tth_b = None
 
     def allocate_buffers(self):
         self.buffers["roicoll"] = None
@@ -77,8 +80,9 @@ class OclMultiAnalyzer:
                                                           ("arm", self.buffers["arm"]),
                                                           ("num_crystal", self.NUM_CRYSTAL),
                                                           ("num_frame", None),
-                                                          ("num_roi", numpy.uint32(512)),
-                                                          ("num_pix", numpy.uint32(1)),
+                                                          ("num_row", numpy.uint32(512)),
+                                                          ("num_col", numpy.uint32(1)),
+                                                          ("columnorder", numpy.uint8(0)),
                                                           ("num_bin", None),
                                                           ("L", self.L),
                                                           ("L2", self.L2),
@@ -110,6 +114,10 @@ class OclMultiAnalyzer:
             src = r.read()
         self.prg = pyopencl.Program(self.ctx, src).build()
 
+    def get_max_size(self):
+        "return maximum allocation size for a single array"
+        return self.ctx.devices[0].max_mem_alloc_size
+
     def integrate(self,
                   roicollection,
                   arm,
@@ -117,8 +125,9 @@ class OclMultiAnalyzer:
                   tth_min,
                   tth_max,
                   dtth,
-                  nroi = 512,
-                  npix = 31,
+                  num_row=512,
+                  num_col=31,
+                  columnorder=0,  # // 0: (column=31, channel=13, row=512), 1: (channel=13, column=31, row=512), 2: (channel=13, row=512, column=31)
                   phi_max=90.,
                   roi_min=0,
                   roi_max=512,
@@ -142,40 +151,40 @@ class OclMultiAnalyzer:
         :param dtthw: Minimum precision expected for ROI being `width` appart, by default dtth
         :return: center of bins, histogram of signal and histogram of normalization, cycles per data-point
         """
-        
-        if roi_step and roi_step!=1:
+
+        if roi_step and roi_step != 1:
             logger.warning("only roi_step=1 is supported in OpenCL")
         dtthw = dtthw or dtth
-            
-        do_debug = logger.getEffectiveLevel()<=logging.DEBUG
+
+        do_debug = logger.getEffectiveLevel() <= logging.DEBUG
         nframes = arm.shape[0]
-        roicoll = numpy.ascontiguousarray(roicollection, dtype=numpy.int32).reshape((nframes, self.NUM_CRYSTAL, nroi, npix))
+        roicoll = numpy.ascontiguousarray(roicollection, dtype=numpy.int32).reshape((nframes, self.NUM_CRYSTAL, num_row, num_col))
         mon = numpy.ascontiguousarray(mon, dtype=numpy.int32)
         tth_max += 0.5 * dtth
-        tth_b = numpy.arange(tth_min, tth_max + (0.5-numpy.finfo("float64").eps) * dtth, dtth)
+        tth_b = numpy.arange(tth_min, tth_max + (0.5 - numpy.finfo("float64").eps) * dtth, dtth)
         tth_min -= 0.5 * dtth
         nbin = tth_b.size
         assert mon.shape[0] == arm.shape[0], "monitor array shape matches the one from arm array "
-        
+
         arm = numpy.deg2rad(arm)
         try:
-            max_frames = min(int(int(self.ctx.devices[0].max_mem_alloc_size)/(numpy.dtype(numpy.int32).itemsize*self.NUM_CRYSTAL*nroi)), 
+            max_frames = min(int(int(self.ctx.devices[0].max_mem_alloc_size) / (numpy.dtype(numpy.int32).itemsize * self.NUM_CRYSTAL * num_row)),
                              nframes)
         except:
             max_frames = None
         logger.info(f"Allocate `out_norm` on device for {4*self.NUM_CRYSTAL*nbin/1e6}MB")
         self.buffers["out_norm"] = cla.empty(self.queue, (self.NUM_CRYSTAL, nbin), dtype=numpy.int32)
-        logger.info(f"Allocate `out_signal` on device for {4*self.NUM_CRYSTAL*nbin*npix/1e6}MB")
-        self.buffers["out_signal"] = cla.empty(self.queue, (self.NUM_CRYSTAL, nbin, npix), dtype=numpy.int32)
-        evt = self.prg.memset(self.queue, (nbin, self.NUM_CRYSTAL), None, 
+        logger.info(f"Allocate `out_signal` on device for {4*self.NUM_CRYSTAL*nbin*num_col/1e6}MB")
+        self.buffers["out_signal"] = cla.empty(self.queue, (self.NUM_CRYSTAL, nbin, num_col), dtype=numpy.int32)
+        evt = self.prg.memset(self.queue, (nbin, self.NUM_CRYSTAL), None,
                               numpy.uint32(self.NUM_CRYSTAL),
                               numpy.uint32(nbin),
-                              numpy.uint32(npix),
+                              numpy.uint32(num_col),
                               self.buffers["out_norm"].data,
                               self.buffers["out_signal"].data)
         if max_frames:
-            logger.info(f"Allocate partial `roicoll` on device for {numpy.dtype(numpy.int32).itemsize*self.NUM_CRYSTAL*nroi*npix*max_frames/1e6}MB")
-            self.buffers["roicoll"] = cla.empty(self.queue, (max_frames, self.NUM_CRYSTAL, nroi, npix), dtype=numpy.int32)
+            logger.info(f"Allocate partial `roicoll` on device for {numpy.dtype(numpy.int32).itemsize*self.NUM_CRYSTAL*num_row*num_col*max_frames/1e6}MB")
+            self.buffers["roicoll"] = cla.empty(self.queue, (max_frames, self.NUM_CRYSTAL, num_row, num_col), dtype=numpy.int32)
             logger.info(f"Allocate partial  `mon` on device for {numpy.dtype(numpy.int32).itemsize*max_frames/1e6}MB")
             self.buffers["monitor"] = cla.empty(self.queue, (max_frames), dtype=numpy.int32)
             logger.info(f"Allocate partial  `arm` on device for {numpy.dtype(numpy.float64).itemsize*max_frames/1e6}MB")
@@ -194,67 +203,184 @@ class OclMultiAnalyzer:
         kwags["out_norm"] = self.buffers["out_norm"].data
         kwags["out_signal"] = self.buffers["out_signal"].data
         kwags["num_frame"] = numpy.uint32(max_frames if max_frames else nframes)
-        kwags["num_roi"] = numpy.uint32(nroi)
-        kwags["num_pix"] = numpy.uint32(npix)
+        kwags["num_row"] = numpy.uint32(num_row)
+        kwags["num_col"] = numpy.uint32(num_col)
+        kwags["columnorder"] = numpy.uint8(columnorder)
         kwags["num_bin"] = numpy.uint32(nbin)
-        kwags["resolution"] = numpy.deg2rad(resolution*dtth)
+        kwags["resolution"] = numpy.deg2rad(resolution * dtth)
         kwags["niter"] = numpy.int32(iter_max)
         kwags["phi_max"] = numpy.deg2rad(phi_max)
         kwags["tth_min"] = numpy.deg2rad(tth_min)
         kwags['tth_max'] = numpy.deg2rad(tth_max)
         kwags["dtth"] = numpy.deg2rad(dtth)
         kwags["roi_min"] = numpy.uint32(max(roi_min, 0))
-        kwags["roi_max"] = numpy.uint32(min(roi_max, nroi))
-        kwags["local"] = pyopencl.LocalMemory(8*nroi)
-        kwags["width"] = numpy.int32(0.5*width/self.pixel)
+        kwags["roi_max"] = numpy.uint32(min(roi_max, num_row))
+        kwags["local"] = pyopencl.LocalMemory(8 * num_row)
+        kwags["width"] = numpy.int32(0.5 * width / self.pixel)
         kwags["dtthw"] = numpy.deg2rad(dtthw)
         if do_debug:
-            logger.info(f"Allocate `cycles` on device for {self.NUM_CRYSTAL*nroi*nframes/1e6}MB")
-            
+            logger.info(f"Allocate `cycles` on device for {self.NUM_CRYSTAL*num_row*nframes/1e6}MB")
+
             if max_frames:
-                self.buffers["cycles"] = cla.empty(self.queue, (self.NUM_CRYSTAL, nroi, max_frames), dtype=numpy.uint8)
+                self.buffers["cycles"] = cla.empty(self.queue, (self.NUM_CRYSTAL, num_row, max_frames), dtype=numpy.uint8)
             else:
-                self.buffers["cycles"] = cla.empty(self.queue, (self.NUM_CRYSTAL, nroi, nframes), dtype=numpy.uint8)
-            cycles = numpy.zeros((self.NUM_CRYSTAL, nroi, nframes), dtype=numpy.uint8)
+                self.buffers["cycles"] = cla.empty(self.queue, (self.NUM_CRYSTAL, num_row, nframes), dtype=numpy.uint8)
+            cycles = numpy.zeros((self.NUM_CRYSTAL, num_row, nframes), dtype=numpy.uint8)
         else:
             self.buffers["cycles"] = cla.empty(self.queue, (1, 1, 1), dtype=numpy.uint8)
         kwags["do_debug"] = numpy.int32(do_debug)
         kwags["cycles"] = self.buffers["cycles"].data
-            
+
         if do_debug:
             log = ["Parameters of the `integrate` kernel:"]
-            i=0
-            for k,v in kwags.items():
-                i+=1
+            i = 0
+            for k, v in kwags.items():
+                i += 1
                 log.append(f"#{i}\t{k}: {v}")
             logger.debug("\n".join(log))
         if max_frames:
             for start in range(0, nframes, max_frames):
-                stop = start+max_frames
-                if stop<nframes:
-                    sub_roicol = roicoll[start:stop, :, :]
+                stop = start + max_frames
+                if stop < nframes:
+                    sub_roicol = roicoll[start:stop,:,:]
                     sub_arm = arm[start:stop]
                     sub_mon = mon[start:stop]
                 else:
                     stop = nframes
-                    sub_roicol = numpy.empty((max_frames, self.NUM_CRYSTAL, nroi), dtype=numpy.int32)
-                    sub_roicol[:stop-start, ...] = roicoll[start:stop, ...]
+                    sub_roicol = numpy.empty((max_frames, self.NUM_CRYSTAL, num_row), dtype=numpy.int32)
+                    sub_roicol[:stop - start, ...] = roicoll[start:stop, ...]
                     sub_arm = numpy.empty((max_frames), dtype=numpy.float64)
-                    sub_arm[:stop-start] = arm[start:stop]
+                    sub_arm[:stop - start] = arm[start:stop]
                     sub_mon = numpy.empty((max_frames), dtype=numpy.int32)
-                    sub_mon[:stop-start] = mon[start:stop]
+                    sub_mon[:stop - start] = mon[start:stop]
                 self.buffers["roicoll"].set(sub_roicol)
                 self.buffers["monitor"].set(sub_mon)
                 self.buffers["arm"].set(sub_arm)
-                evt = self.prg.integrate(self.queue, (nroi, stop-start, self.NUM_CRYSTAL), (nroi, 1, 1), *kwags.values())
+                evt = self.prg.integrate(self.queue, (num_row, stop - start, self.NUM_CRYSTAL), (num_row, 1, 1), *kwags.values())
                 if do_debug:
-                    cycles[:, :, start:stop] = self.buffers["cycles"].get()[:, :, :stop-start]
+                    cycles[:,:, start:stop] = self.buffers["cycles"].get()[:,:,:stop - start]
         else:
-            evt = self.prg.integrate(self.queue, (nroi, nframes, self.NUM_CRYSTAL), (nroi, 1, 1), *kwags.values())
+            evt = self.prg.integrate(self.queue, (num_row, nframes, self.NUM_CRYSTAL), (num_row, 1, 1), *kwags.values())
             if do_debug:
                 cycles = self.buffers["cycles"].get()
         evt.wait()
         if do_debug:
-            return tth_b, self.buffers["out_signal"].get(), self.buffers["out_norm"].get(), cycles 
+            return tth_b, self.buffers["out_signal"].get(), self.buffers["out_norm"].get(), cycles
         else:
             return tth_b, self.buffers["out_signal"].get(), self.buffers["out_norm"].get()
+
+#-----------------------------------------------
+#    Multi pass implementation
+#-----------------------------------------------
+    def init_integrate(self,
+                  max_frames,
+                  arm,
+                  mon,
+                  tth_min,
+                  tth_max,
+                  dtth,
+                  num_row=512,
+                  num_col=31,
+                  columnorder=0,  # // 0: (column=31, channel=13, row=512), 1: (channel=13, column=31, row=512), 2: (channel=13, row=512, column=31)
+                  phi_max=90.,
+                  roi_min=0,
+                  roi_max=512,
+                  roi_step=1,
+                  iter_max=250,
+                  resolution=1e-3,
+                  width=1,
+                  dtthw=None
+                  ):
+        """Initializes the integrator for the rebinning of several small chunks of data.
+        
+        :param max_frames: number of frames (max) per block
+        :param arm: 2theta position of the arm (in degrees)
+        :param tth_min: start position of the histograms (in degrees)
+        :param tth_max: End positon of the histogram (in degrees)
+        :param dtth: bin size for the histogram (in degrees)
+        :param phi_max: discard data with |phi| larger than this value (in degree)
+        :param iter_max: maximum number of iteration in the 2theta convergence
+        :param resolution: precision of the 2theta convergence in fraction of dtth
+        :param width: width of the sample, same unit as pixels
+        :param dtthw: Minimum precision expected for ROI being `width` appart, by default dtth
+        :return: nothing.
+        """
+
+        if roi_step and roi_step != 1:
+            logger.warning("only roi_step=1 is supported in OpenCL")
+        dtthw = dtthw or dtth
+
+        nframes = arm.shape[0]
+        self.mon = mon = numpy.ascontiguousarray(mon, dtype=numpy.int32)
+        tth_max += 0.5 * dtth
+        self.tth_b = tth_b = numpy.arange(tth_min, tth_max + (0.5 - numpy.finfo("float64").eps) * dtth, dtth)
+        tth_min -= 0.5 * dtth
+        nbin = tth_b.size
+        assert mon.shape[0] == arm.shape[0], "monitor array shape matches the one from arm array "
+
+        self.arm = arm = numpy.deg2rad(arm)
+        logger.info(f"Allocate `out_norm` on device for {4*self.NUM_CRYSTAL*nbin/1e6:.3f}MB")
+        self.buffers["out_norm"] = cla.empty(self.queue, (self.NUM_CRYSTAL, nbin), dtype=numpy.int32)
+        logger.info(f"Allocate `out_signal` on device for {4*self.NUM_CRYSTAL*nbin*num_col/1e6:.3f}MB")
+        self.buffers["out_signal"] = cla.empty(self.queue, (self.NUM_CRYSTAL, nbin, num_col), dtype=numpy.int32)
+        evt = self.prg.memset(self.queue, (nbin, self.NUM_CRYSTAL), None,
+                              numpy.uint32(self.NUM_CRYSTAL),
+                              numpy.uint32(nbin),
+                              numpy.uint32(num_col),
+                              self.buffers["out_norm"].data,
+                              self.buffers["out_signal"].data)
+        logger.info(f"Allocate partial `roicoll` on device for {numpy.dtype(numpy.int32).itemsize*self.NUM_CRYSTAL*num_row*num_col*max_frames/1e6:.3f}MB")
+        self.buffers["roicoll"] = cla.empty(self.queue, (max_frames, self.NUM_CRYSTAL, num_row, num_col), dtype=numpy.int32)
+        logger.info(f"Allocate partial  `mon` on device for {numpy.dtype(numpy.int32).itemsize*max_frames/1e6:.3f}MB")
+        self.buffers["monitor"] = cla.empty(self.queue, (max_frames), dtype=numpy.int32)
+        logger.info(f"Allocate partial  `arm` on device for {numpy.dtype(numpy.float64).itemsize*max_frames/1e6:.3f}MB")
+        self.buffers["arm"] = cla.empty(self.queue, (max_frames), dtype=numpy.float64)
+        kwags = self.kernel_arguments["integrate"]
+        kwags["roicoll"] = self.buffers["roicoll"].data
+        kwags["monitor"] = self.buffers["monitor"].data
+        kwags["arm"] = self.buffers["arm"].data
+        kwags["out_norm"] = self.buffers["out_norm"].data
+        kwags["out_signal"] = self.buffers["out_signal"].data
+        kwags["num_frame"] = numpy.uint32(max_frames if max_frames else nframes)
+        kwags["num_row"] = numpy.uint32(num_row)
+        kwags["num_col"] = numpy.uint32(num_col)
+        kwags["columnorder"] = numpy.uint8(columnorder)
+        kwags["num_bin"] = numpy.uint32(nbin)
+        kwags["resolution"] = numpy.deg2rad(resolution * dtth)
+        kwags["niter"] = numpy.int32(iter_max)
+        kwags["phi_max"] = numpy.deg2rad(phi_max)
+        kwags["tth_min"] = numpy.deg2rad(tth_min)
+        kwags['tth_max'] = numpy.deg2rad(tth_max)
+        kwags["dtth"] = numpy.deg2rad(dtth)
+        kwags["roi_min"] = numpy.uint32(max(roi_min, 0))
+        kwags["roi_max"] = numpy.uint32(min(roi_max, num_row))
+        kwags["local"] = pyopencl.LocalMemory(8 * num_row)
+        kwags["width"] = numpy.int32(0.5 * width / self.pixel)
+        kwags["dtthw"] = numpy.deg2rad(dtthw)
+        self.buffers["cycles"] = cla.empty(self.queue, (1, 1, 1), dtype=numpy.uint8)
+        kwags["do_debug"] = numpy.int32(0)
+        kwags["cycles"] = self.buffers["cycles"].data
+        evt.wait()
+
+    def partial_integate(self, roicol_description, roicol_data):
+        start = roicol_description.start
+        stop = roicol_description.stop
+        sub_arm = self.arm[start:stop]
+        sub_mon = self.mon[start:stop]
+
+        self.buffers["roicoll"].set(numpy.ascontiguousarray(roicol_data, numpy.int32))
+        self.buffers["monitor"].set(sub_mon)
+        self.buffers["arm"].set(sub_arm)
+        kwags = self.kernel_arguments["integrate"]
+        num_row = int(kwags["num_row"])
+        evt = self.prg.integrate(self.queue, (num_row, stop - start, self.NUM_CRYSTAL), (num_row, 1, 1), *kwags.values())
+        evt.wait()
+
+    def finish_integrate(self):
+        return self.tth_b, self.buffers["out_signal"].get(), self.buffers["out_norm"].get()
+
+    def reset(self):
+        "reset the integrator and zeros out all arrays"
+        self.tth_b = None
+        self.arm = None
+        self.mon = None

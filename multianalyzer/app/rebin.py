@@ -32,12 +32,15 @@ __author__ = "Jérôme Kieffer"
 __contact__ = "Jerome.Kieffer@ESRF.eu"
 __license__ = "MIT"
 __copyright__ = "European Synchrotron Radiation Facility, Grenoble, France"
-__date__ = "14/10/2022"
+__date__ = "17/10/2022"
 __status__ = "development"
 
 import os
+import sys
+import signal
 from argparse import ArgumentParser
-from contextlib import contextmanager
+from queue import Queue
+from threading import Event
 import logging
 import time
 try:
@@ -64,7 +67,21 @@ try:
     from ..opencl import OclMultiAnalyzer
 except ImportError:
     OclMultiAnalyzer = None
-from ..file_io import topas_parser, ID22_bliss_parser, save_rebin, all_entries, get_isotime
+from ..file_io import topas_parser, ID22_bliss_parser, save_rebin, all_entries, get_isotime, RoiColReader
+from ..timer import Timer
+
+abort = Event()
+
+
+def sigterm_handler(_signo, _stack_frame):
+    sys.stderr.write(f"\nCaught signal {_signo}, quitting !\n")
+    sys.stderr.flush()
+    abort.set()
+
+
+signal.signal(signal.SIGTERM, sigterm_handler)
+signal.signal(signal.SIGINT, sigterm_handler)
+queue = Queue()
 
 
 def parse():
@@ -140,7 +157,7 @@ def parse():
 
 
 def rebin_result_generator(filename=None, entries=None, hdf5_data=None, output=None, timer=None, pars=None, device=None, debug=None, energy=None, wavelength=None,
-               pixel=None, step=None, range=None, phi=None, width=None, delta2theta=None, iter=None, startp=None, endp=None, 
+               pixel=None, step=None, range=None, phi=None, width=None, delta2theta=None, iter=None, startp=None, endp=None,
                num_analyzer=None, num_row=512, num_col=1, order=0):
     if not pars:
         raise ValueError("'pars' parameter is missing")
@@ -185,39 +202,52 @@ def rebin_result_generator(filename=None, entries=None, hdf5_data=None, output=N
     # thd = hdf5_data["thd"]
     tha = numpy.rad2deg(param["manom"])
     thd = numpy.rad2deg(param["mantth"])
-    
+
     if num_analyzer:
-        assert num_analyzer== len(center)
-        
+        assert num_analyzer == len(center)
+
     # Finally initialize the rebinning engine.
     if device and OclMultiAnalyzer:
         mma = OclMultiAnalyzer(L, L2, pixel, center, tha, thd, psi, rollx, rolly, device=device.split(","))
         print(f"Using device {mma.ctx.devices[0]}")
+        block_size = mma.get_max_size()
     else:
         mma = MultiAnalyzer(L, L2, pixel, center, tha, thd, psi, rollx, rolly)
         print("Using Cython+OpenMP")
+        block_size = None
 
     if hdf5_data is None:
         print(f"Read ROI-collection from HDF5 file: {filename}")
         with timer.timeit_read():
-            hdf5_data = ID22_bliss_parser(filename, entries=entries, exclude_entries=processed)
-
+            hdf5_data = ID22_bliss_parser(filename, entries=entries, exclude_entries=processed, block_size=block_size)
     print(f"Processing {len(hdf5_data)} entries: {list(hdf5_data)}")
 
+    to_process = []
+    to_read = []
     for entry in hdf5_data:
         if entry in processed:
             logger.warning("Skip entry '%s' (already processed)", entry)
             continue
+        if "roicol" not in hdf5_data[entry]:
+            to_read += hdf5_data[entry]["roicol_lst"]
+        to_process.append(entry)
+    if to_process:
+        reader = RoiColReader(to_process, queue, abort, timer)
+        reader.start()
+    else:
+        reader = None
 
-        roicol = hdf5_data[entry]["roicol"]
+    for entry in to_process:
         arm = hdf5_data[entry]["arm"]
         mon = hdf5_data[entry]["mon"]
-        if len(roicol)!=len(arm) or len(arm)!=len(mon):
-            kept_points = min(len(roicol), len(arm), len(mon))
-            roicol = roicol[:kept_points]
-            arm = arm[:kept_points]
-            mon = mon[:kept_points]
-            logger.warning(f"Some arrays have different length, was the scan interrupted ? shrinking scan size: {kept_points} !")
+        if "roicol" in hdf5_data[entry]:
+            roicol = hdf5_data[entry]["roicol"]
+            if len(roicol) != len(arm) or len(arm) != len(mon):
+                kept_points = min(len(roicol), len(arm), len(mon))
+                roicol = roicol[:kept_points]
+                arm = arm[:kept_points]
+                mon = mon[:kept_points]
+                logger.warning(f"Some arrays have different length, was the scan interrupted ? shrinking scan size: {kept_points} !")
         dtth = step or (abs(numpy.median(arm[1:] - arm[:-1])))
         if range:
             tth_min = range[0] if numpy.isfinite(range[0]) else  arm.min() + psi.min()
@@ -227,20 +257,60 @@ def rebin_result_generator(filename=None, entries=None, hdf5_data=None, output=N
             tth_max = arm.max() + psi.max()
 
         print(f"Rebin data from {source_name}::{entry}")
-        with timer.timeit_rebin():
-            res = mma.integrate(roicol,
-                                arm,
-                                mon,
-                                tth_min, tth_max, dtth=dtth,                                
-                                iter_max=iter,
-                                roi_min=startp,
-                                roi_max=endp,
-                                phi_max=phi,
-                                num_row=num_row,
-                                num_col=num_col,
-                                order=order, #// 0: (column=31, channel=13, row=512), 1: (channel=13, column=31, row=512), 2: (channel=13, row=512, column=31)  
-                                width=width or param.get("wg", 0.0),
-                                dtthw=delta2theta)
+        if "roicol" in hdf5_data[entry]:
+            roicol = hdf5_data[entry]["roicol"]
+            with timer.timeit_rebin():
+                res = mma.integrate(roicol,
+                                    arm,
+                                    mon,
+                                    tth_min, tth_max, dtth=dtth,
+                                    iter_max=iter,
+                                    roi_min=startp,
+                                    roi_max=endp,
+                                    phi_max=phi,
+                                    num_row=num_row,
+                                    num_col=num_col,
+                                    columnorder=order,  # // 0: (column=31, channel=13, row=512), 1: (channel=13, column=31, row=512), 2: (channel=13, row=512, column=31)
+                                    width=width or param.get("wg", 0.0),
+                                    dtthw=delta2theta)
+        else:
+            desc, data = queue.get()
+            if desc.stop < len(arm):
+                with timer.timeit_rebin():
+                    mma.init_integrate(desc.stop, arm,
+                                        mon,
+                                        tth_min, tth_max, dtth=dtth,
+                                        iter_max=iter,
+                                        roi_min=startp,
+                                        roi_max=endp,
+                                        phi_max=phi,
+                                        num_row=num_row,
+                                        num_col=num_col,
+                                        columnorder=order,  # // 0: (column=31, channel=13, row=512), 1: (channel=13, column=31, row=512), 2: (channel=13, row=512, column=31)
+                                        width=width or param.get("wg", 0.0),
+                                        dtthw=delta2theta)
+                    mma.partial_integate(desc, data)
+                while desc.stop < len(arm):
+                    desc, data = queue.get()
+                    with timer.timeit_rebin():
+                        mma.partial_integate(desc, data)
+                with timer.timeit_rebin():
+                    res = mma.finish_integrate()
+            else:
+                with timer.timeit_rebin():
+                    res = mma.integrate(data,
+                                        arm,
+                                        mon,
+                                        tth_min, tth_max, dtth=dtth,
+                                        iter_max=iter,
+                                        roi_min=startp,
+                                        roi_max=endp,
+                                        phi_max=phi,
+                                        num_row=num_row,
+                                        num_col=num_col,
+                                        columnorder=order,  # // 0: (column=31, channel=13, row=512), 1: (channel=13, column=31, row=512), 2: (channel=13, row=512, column=31)
+                                        width=width or param.get("wg", 0.0),
+                                        dtthw=delta2theta)
 
         if debug:
             numpy.savez("dump", res)
@@ -255,45 +325,6 @@ def rebin_result_generator(filename=None, entries=None, hdf5_data=None, output=N
 def rebin_file(**kwargs):
     for _ in rebin_result_generator(**kwargs):
         pass
-
-
-class Timer():
-    def __init__(self) -> None:
-        self.start_time = get_isotime()
-        self.t_start = time.perf_counter()
-        self.rt_read = 0.0
-        self.rt_rebin = 0.0
-        self.rt_write = 0.0
-
-    def print(self):
-        print(f"Total execution time: {time.perf_counter()-self.t_start:.3f}s (of which read:{self.rt_read:.3f}s regrid:{self.rt_rebin:.3f} write:{self.rt_write:.3f}s)")
-
-    @contextmanager
-    def timeit_read(self):
-        t0 = time.perf_counter()
-        yield
-        t1 = time.perf_counter()
-        dt = t1 - t0
-        self.rt_read += dt
-        logger.info(f"HDF5 read time: {dt:.3f}s")
-
-    @contextmanager
-    def timeit_write(self):
-        t0 = time.perf_counter()
-        yield
-        t1 = time.perf_counter()
-        dt = t1 - t0
-        self.rt_write += dt
-        logger.info(f"HDF5 write time: {dt:.3f}s")
-
-    @contextmanager
-    def timeit_rebin(self):
-        t0 = time.perf_counter()
-        yield
-        t1 = time.perf_counter()
-        dt = t1 - t0
-        self.rt_rebin += dt
-        logger.info(f"Rebinning time: {dt:.3f}s")
 
 
 def main():
