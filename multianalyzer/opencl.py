@@ -123,11 +123,13 @@ class OclMultiAnalyzer:
 
     def set_shape(self, columnorder, nframes, num_col, num_row, **kw):
         if columnorder == 0:
-            self.shape = (nframes, num_col, self.NUM_CRYSTAL, num_row)
+            shape = (nframes, num_col, self.NUM_CRYSTAL, num_row)
         elif columnorder == 1:
-            self.shape = (nframes, self.NUM_CRYSTAL, num_col, num_row)
+            shape = (nframes, self.NUM_CRYSTAL, num_col, num_row)
         elif columnorder == 2:
-            self.shape = (nframes, self.NUM_CRYSTAL, num_row, num_col)
+            shape = (nframes, self.NUM_CRYSTAL, num_row, num_col)
+        self.shape = shape
+        return shape
 
     def integrate(self,
                   roicollection,
