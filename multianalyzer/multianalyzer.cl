@@ -284,7 +284,7 @@ kernel void  integrate(
         int32_t idx = convert_int_rtn((tth - tth_min)/dtth);
         size_t pos = num_bin*ida + idx;
         atomic_add(&out_norm[pos], nrm);
-        size_t read_pos 
+        size_t read_pos;
         size_t write_pos = pos*num_col;
         for (int32_t col=0; col<num_col; col++){
             if (columnorder==0){ //(frame, column=31, channel=13, row=512)  
