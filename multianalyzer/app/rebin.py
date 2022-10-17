@@ -232,7 +232,7 @@ def rebin_result_generator(filename=None, entries=None, hdf5_data=None, output=N
             to_read += hdf5_data[entry]["roicol_lst"]
         to_process.append(entry)
     if to_read:
-        logger.debug("Asynchronous read of: \n" + "\n".join(to_read))
+        logger.debug("Asynchronous read of: \n" + "\n".join(str(i) for i in to_read))
         reader = RoiColReader(to_read, queue, abort, timer)
         reader.start()
     else:
