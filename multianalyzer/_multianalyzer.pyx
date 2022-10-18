@@ -4,8 +4,8 @@
 ##cython: linetrace=True
 
 __author__ = "Jérôme KIEFFER"
-__date__  = "17/10/2022"
-__copyright__ = "2021, ESRF, France"
+__date__  = "18/10/2022"
+__copyright__ = "2021-2022, ESRF, France"
 __licence__ = "MIT"
 
 import logging
@@ -34,6 +34,12 @@ cdef class MultiAnalyzer:
         public float64_t L, L2, pixel, _tha, _thd, sin_tha, cot_tha, cos_thd
         public float64_t[::1] _center, _rollx, _rolly, _psi, cos_rx, sin_rx, cos_ry, sin_ry, _Lp, _Ln
         public uint8_t[:, :, ::1] cycles #array to debug the number of cycles spent in refine
+        #Arrays used when using multi-pass
+        public float64_t[::1] out_tth, arm, mon
+        public float64_t[:, ::1] out_norm
+        public int32_t[:, :, ::1] out_signal
+        public dict scalars
+        public tuple shape
         
     def __cinit__(self, L, L2, pixel, center, tha, thd, psi, rollx, rolly):
         "Performes the initialization of the data"
@@ -52,6 +58,14 @@ cdef class MultiAnalyzer:
         self._Ln = numpy.empty(self.NUM_CRYSTAL, dtype=numpy.float64)
         self._Lp = numpy.empty(self.NUM_CRYSTAL, dtype=numpy.float64)
         self.cycles = numpy.empty((self.NUM_CRYSTAL, self.NUM_ROW, 1) , dtype=numpy.uint8)
+        #Those arrays are used only when working in multipass
+        self.scalars = {}
+        self.out_tth = None
+        self.arm = None
+        self.mon = None
+        self.shape = None
+        self.out_norm = None
+        self.out_signal = None
         
     def __dealloc(self):
         self._center = None
@@ -65,7 +79,15 @@ cdef class MultiAnalyzer:
         self._Ln = None
         self._Lp = None
         self.cycles = None
-
+        #Those arrays are used only when working in multipass
+        self.out_tth = None
+        self.arm = None
+        self.mon = None
+        self.shape = None
+        self.out_norm = None
+        self.out_signal = None
+        self.scalars = None
+        
     @property
     def Lp(self):
         """Sample-analyzer distance at secondary diffraction point
@@ -140,7 +162,7 @@ cdef class MultiAnalyzer:
         return self._Ln * (numpy.asarray(self.cos_rx) - numpy.asarray(self.sin_rx)*self.sin_ry*self.cot_tha)
         # return numpy.asarray(self._Ln) * (numpy.asarray(self.cos_rx)*self.sin_tha - numpy.asarray(self.sin_rx)*numpy.asarray(self.sin_ry)*self.cos_tha) / self.sin_tha
     
-    cdef double _calc_zd(self, int idr, int ida) nogil:
+    cdef float64_t _calc_zd(self, int idr, int ida) nogil:
         """Calculate the distance to the center along z
         
         :param idr: index of ROI 
@@ -149,7 +171,7 @@ cdef class MultiAnalyzer:
         """
         return self.pixel * (idr - self._center[ida]) # -> in unit
 
-    cdef double _init_phi(self, double zd, double tth) nogil:
+    cdef float64_t _init_phi(self, float64_t zd, float64_t tth) nogil:
         """Approximative value of the azimuthal angle
         
         :param zd: distance to the center of the detector
@@ -158,7 +180,7 @@ cdef class MultiAnalyzer:
         """
         return atan2(zd, (self.L+self.L2)*fabs(sin(tth)))
 
-    cdef double _init_sin_phi(self, double zd, double sin_tth) nogil:
+    cdef float64_t _init_sin_phi(self, float64_t zd, float64_t sin_tth) nogil:
         """Approximative value of the sine of the azimuthal angle
         
         :param zd: distance to the center of the detector
@@ -166,7 +188,7 @@ cdef class MultiAnalyzer:
         :return: an approximation of the sine of azimuthal angle phi.
         """
         cdef: 
-            double L, tan_phi #, tan2_phi
+            float64_t L, tan_phi #, tan2_phi
         if sin_tth == 0.0:
             return 0.0
         else:
@@ -176,7 +198,7 @@ cdef class MultiAnalyzer:
             # tan2_phi = tan_phi * tan_phi 
             # return copysign(sqrt(tan2_phi/(1.0+tan2_phi)), zd) 
 
-    cdef double _calc_phi(self, int ida, double zd, double L3, double tth) nogil:
+    cdef float64_t _calc_phi(self, int ida, float64_t zd, float64_t L3, float64_t tth) nogil:
         """Implementation of Eq29 
         :param ida: index of analyzer
         :param zd: height of ROI
@@ -185,18 +207,18 @@ cdef class MultiAnalyzer:
         :return: azimuthal angle phi, in radian, of cours !
         """
         cdef:
-            double Lp = self._Lp[ida]
-            double sin_tha = self.sin_tha
-            double sin_rx  = self.sin_rx[ida]
-            double cos_ry  = self.sin_ry[ida]
-            double num, den, ratio, res
+            float64_t Lp = self._Lp[ida]
+            float64_t sin_tha = self.sin_tha
+            float64_t sin_rx  = self.sin_rx[ida]
+            float64_t cos_ry  = self.sin_ry[ida]
+            float64_t num, den, ratio, res
         num = zd + 2.0*L3*sin_tha*sin_rx*cos_ry
         den = (Lp+L3)*sin(tth)
         ratio = num/den
         res = asin(ratio) if fabs(ratio)<1.0 else copysign(0.5*pi, ratio)
         return res
 
-    cdef double _calc_sin_phi(self, int ida, double zd, double L3, double sin_tth) nogil:
+    cdef float64_t _calc_sin_phi(self, int ida, float64_t zd, float64_t L3, float64_t sin_tth) nogil:
         """Implementation of Eq29, alternative implementation based on sin 
         :param ida: index of analyzer
         :param zd: height of ROI
@@ -205,18 +227,18 @@ cdef class MultiAnalyzer:
         :return: sine of the azimuthal angle phi
         """
         cdef:
-            double Lp = self._Lp[ida]
-            double sin_tha = self.sin_tha
-            double sin_rx  = self.sin_rx[ida]
-            double cos_ry  = self.sin_ry[ida]
-            double num, den, ratio
+            float64_t Lp = self._Lp[ida]
+            float64_t sin_tha = self.sin_tha
+            float64_t sin_rx  = self.sin_rx[ida]
+            float64_t cos_ry  = self.sin_ry[ida]
+            float64_t num, den, ratio
         num = zd + 2.0*L3*sin_tha*sin_rx*cos_ry
         den = (Lp+L3) * sin_tth
         ratio = num/den
         return fmin(1.0, fmax(ratio, -1.0))
 
     
-    cdef double _calc_L3(self, int ida, double arm, double tth, double phi) nogil:
+    cdef float64_t _calc_L3(self, int ida, float64_t arm, float64_t tth, float64_t phi) nogil:
         """Implementation Eq28.
         
         Calculate the total distance from analyzer (at diffraction point) to detector
@@ -228,31 +250,31 @@ cdef class MultiAnalyzer:
         :return: analyzer-detector distance.
         """
         cdef:
-            double cos_phi = cos(phi)
-            double cos_tth = cos(tth)
-            double sin_tth = sin(tth)
+            float64_t cos_phi = cos(phi)
+            float64_t cos_tth = cos(tth)
+            float64_t sin_tth = sin(tth)
 
-            double arm_d = arm - self._thd
-            double cos_arm_d = cos(arm_d)
-            double sin_arm_d = sin(arm_d)
+            float64_t arm_d = arm - self._thd
+            float64_t cos_arm_d = cos(arm_d)
+            float64_t sin_arm_d = sin(arm_d)
 
-            double arm_a_n = arm + self._psi[ida] - self._tha
-            double cos_arm_a_n = cos(arm_a_n)
-            double sin_arm_a_n = sin(arm_a_n)
+            float64_t arm_a_n = arm + self._psi[ida] - self._tha
+            float64_t cos_arm_a_n = cos(arm_a_n)
+            float64_t sin_arm_a_n = sin(arm_a_n)
             
-            double sin_tha = self.sin_tha
-            double  cos_rx = self.cos_rx[ida]
-            double  sin_rx = self.sin_rx[ida]
-            double  sin_ry = self.sin_ry[ida]
-            double num, den
+            float64_t sin_tha = self.sin_tha
+            float64_t  cos_rx = self.cos_rx[ida]
+            float64_t  sin_rx = self.sin_rx[ida]
+            float64_t  sin_ry = self.sin_ry[ida]
+            float64_t num, den
             
         num = self.L*self.cos_thd + self.L2 - self._Lp[ida]*(cos_arm_d*cos_tth + sin_arm_d*sin_tth*cos_phi) 
         den = cos_arm_d*(cos_tth         + 2.0 * sin_tha*(sin_arm_a_n*cos_rx        + cos_arm_a_n*sin_rx*sin_ry))\
             + sin_arm_d*(sin_tth*cos_phi + 2.0 * sin_tha*(sin_arm_a_n*sin_rx*sin_ry - cos_arm_a_n*cos_rx))
         return num/den
     
-    cdef double _calc_L3_v2(self, int ida, double sin_arm_d, double cos_arm_d, double sin_arm_a_n, double cos_arm_a_n, 
-                            double sin_tth, double cos_tth, double sin_phi, double cos_phi) nogil:
+    cdef float64_t _calc_L3_v2(self, int ida, float64_t sin_arm_d, float64_t cos_arm_d, float64_t sin_arm_a_n, float64_t cos_arm_a_n, 
+                            float64_t sin_tth, float64_t cos_tth, float64_t sin_phi, float64_t cos_phi) nogil:
         """Implementation Eq28.
         
         Calculate the total distance from analyzer (at diffraction point) to detector
@@ -265,18 +287,18 @@ cdef class MultiAnalyzer:
         """
         cdef:
             
-            double sin_tha = self.sin_tha
-            double  cos_rx = self.cos_rx[ida]
-            double  sin_rx = self.sin_rx[ida]
-            double  sin_ry = self.sin_ry[ida]
-            double num, den
+            float64_t sin_tha = self.sin_tha
+            float64_t  cos_rx = self.cos_rx[ida]
+            float64_t  sin_rx = self.sin_rx[ida]
+            float64_t  sin_ry = self.sin_ry[ida]
+            float64_t num, den
             
         num = self.L*self.cos_thd + self.L2 - self._Lp[ida]*(cos_arm_d*cos_tth + sin_arm_d*sin_tth*cos_phi) 
         den = cos_arm_d*(cos_tth         + 2.0 * sin_tha*(sin_arm_a_n*cos_rx        + cos_arm_a_n*sin_rx*sin_ry))\
             + sin_arm_d*(sin_tth*cos_phi + 2.0 * sin_tha*(sin_arm_a_n*sin_rx*sin_ry - cos_arm_a_n*cos_rx))
         return num/den
 
-    cdef double _calc_tth(self, int ida, double arm, double phi) nogil:
+    cdef float64_t _calc_tth(self, int ida, float64_t arm, float64_t phi) nogil:
         """Calculate the 2th from Eq 31: 
         
         resolution by development of cos(a-b)
@@ -288,18 +310,18 @@ cdef class MultiAnalyzer:
         :return: Corrected position in 2theta
         """
         cdef:
-            double sin_tha = self.sin_tha
-            double cos_rx = self.cos_rx[ida]
-            double sin_rx = self.sin_rx[ida]
-            double sin_ry = self.sin_ry[ida]
-            double cos_ry = self.cos_ry[ida]
-            double arm_n = arm + self._psi[ida]
-            double arm_a_n = arm_n - self._tha
-            double cos_arm_a = cos(arm_a_n)
-            double sin_arm_a = sin(arm_a_n)
-            double sin_phi = sin(phi)
-            double cos_phi = cos(phi)
-            double X, Y, Z, X2, Y2, Z2, D, D2, S1, S2, S
+            float64_t sin_tha = self.sin_tha
+            float64_t cos_rx = self.cos_rx[ida]
+            float64_t sin_rx = self.sin_rx[ida]
+            float64_t sin_ry = self.sin_ry[ida]
+            float64_t cos_ry = self.cos_ry[ida]
+            float64_t arm_n = arm + self._psi[ida]
+            float64_t arm_a_n = arm_n - self._tha
+            float64_t cos_arm_a = cos(arm_a_n)
+            float64_t sin_arm_a = sin(arm_a_n)
+            float64_t sin_phi = sin(phi)
+            float64_t cos_phi = cos(phi)
+            float64_t X, Y, Z, X2, Y2, Z2, D, D2, S1, S2, S
             
         # Solve `X cos(2th) + Y sin (2th) = Z` for 2th real 
         X = sin_arm_a*cos_rx + cos_arm_a*sin_rx*sin_ry
@@ -311,7 +333,7 @@ cdef class MultiAnalyzer:
         D2 = X2 + Y2
         Z2 = Z*Z
         #Solution from mathematica:
-        #cdef double C, XZ, Z2, G
+        #cdef float64_t C, XZ, Z2, G
         # XZ = X*Z 
         # X2 = X*X
         # Z2 = Z*Z
@@ -323,7 +345,7 @@ cdef class MultiAnalyzer:
         # S2 = atan2(XZ + D4, G - X*sqrt(Y2*(D2-Z2))/Y)
         
         # Solution from wolfram alpha:
-        # cdef double D3, XpZ = X+Z
+        # cdef float64_t D3, XpZ = X+Z
         # if XpZ:
         #     D3 = sqrt(D2 - Z2)
         #     S1 = 2.0 * atan2(Y - D3, XpZ)
@@ -348,7 +370,7 @@ cdef class MultiAnalyzer:
         S = S1 if fabs(arm_n-S1)<fabs(arm_n-S2) else S2
         return S
 
-    cdef double _calc_tth_v2(self, int ida, double arm_n, double sin_arm_a, double cos_arm_a, double sin_phi, double cos_phi) nogil:
+    cdef float64_t _calc_tth_v2(self, int ida, float64_t arm_n, float64_t sin_arm_a, float64_t cos_arm_a, float64_t sin_phi, float64_t cos_phi) nogil:
         """Calculate the 2th from Eq 31: 
         
         resolution by development of cos(a-b)
@@ -361,16 +383,16 @@ cdef class MultiAnalyzer:
         :return: Corrected position in 2theta
         """
         cdef:
-            double sin_tha = self.sin_tha
-            double cos_rx = self.cos_rx[ida]
-            double sin_rx = self.sin_rx[ida]
-            double sin_ry = self.sin_ry[ida]
-            double cos_ry = self.cos_ry[ida]
-            # double arm_n = arm + self._psi[ida]
-            # double arm_a_n = arm_n - self._tha
-            # double cos_arm_a = cos(arm_a_n)
-            # double sin_arm_a = sin(arm_a_n)
-            double X, Y, Z, X2, Y2, D, D2, S1, S2, S
+            float64_t sin_tha = self.sin_tha
+            float64_t cos_rx = self.cos_rx[ida]
+            float64_t sin_rx = self.sin_rx[ida]
+            float64_t sin_ry = self.sin_ry[ida]
+            float64_t cos_ry = self.cos_ry[ida]
+            # float64_t arm_n = arm + self._psi[ida]
+            # float64_t arm_a_n = arm_n - self._tha
+            # float64_t cos_arm_a = cos(arm_a_n)
+            # float64_t sin_arm_a = sin(arm_a_n)
+            float64_t X, Y, Z, X2, Y2, D, D2, S1, S2, S
             
         # Solve `X cos(2th) + Y sin (2th) = Z` for 2th real 
         X = sin_arm_a*cos_rx + cos_arm_a*sin_rx*sin_ry
@@ -400,7 +422,7 @@ cdef class MultiAnalyzer:
         # t = 2 (π n + tan^(-1)((Y - sqrt(X^2 + Y^2 - Z^2))/(X + Z))) and X + Z!=0 and X^2 + X Z + Y^2!=Y sqrt(X^2 + Y^2 - Z^2) and n element Z
         # t = 2 (π n + tan^(-1)((sqrt(X^2 + Y^2 - Z^2) + Y)/(X + Z))) and X + Z!=0 and Y (sqrt(X^2 + Y^2 - Z^2) + Y) + X^2 + X Z!=0 and n element Z
         # t = 2 π n - 2 tan^(-1)(X/Y) and Y!=0 and X^2 + Y^2!=0 and Z = -X and n element Z
-        cdef double D3, XpZ=X+Z, Z2=Z*Z, XZ=X*Z, D2XZ, D3Y
+        cdef float64_t D3, XpZ=X+Z, Z2=Z*Z, XZ=X*Z, D2XZ, D3Y
         
         S1 = S2 = 132.456
           
@@ -422,9 +444,9 @@ cdef class MultiAnalyzer:
         return S
 
 
-    cdef double _refine(self, int idr, int ida, 
-                        double arm, double resolution=1e-8, int niter=250, 
-                        double sin_phi_max=1, int idf=-1) nogil:
+    cdef float64_t _refine(self, int idr, int ida, 
+                        float64_t arm, float64_t resolution=1e-8, int niter=250, 
+                        float64_t sin_phi_max=1.0, int idf=-1) nogil:
         """Refine with the angles in radians
         
         :param idr: index of ROI
@@ -438,21 +460,21 @@ cdef class MultiAnalyzer:
         """
         cdef:
             int i
-            double zd, phi, tth_old, tth, L3
-            double sin_phi, cos_phi, sin_tth, cos_tth
-            double arm_n = arm + self._psi[ida]
-            double arm_a_n = arm_n - self._tha
-            double arm_d = arm - self._thd
+            float64_t zd, phi, tth_old, tth, L3
+            float64_t sin_phi, cos_phi, sin_tth, cos_tth
+            float64_t arm_n = arm + self._psi[ida]
+            float64_t arm_a_n = arm_n - self._tha
+            float64_t arm_d = arm - self._thd
 
-            # double cos_arm_n = cos(arm_n)
-            double sin_arm_n = sin(arm_n)
+            # float64_t cos_arm_n = cos(arm_n)
+            float64_t sin_arm_n = sin(arm_n)
 
             
-            double cos_arm_a = cos(arm_a_n)
-            double sin_arm_a = sin(arm_a_n)            
+            float64_t cos_arm_a = cos(arm_a_n)
+            float64_t sin_arm_a = sin(arm_a_n)            
             
-            double cos_arm_d = cos(arm_d)
-            double sin_arm_d = sin(arm_d)
+            float64_t cos_arm_d = cos(arm_d)
+            float64_t sin_arm_d = sin(arm_d)
 
         zd = self._calc_zd(idr, ida)
         sin_phi = self._init_sin_phi(zd, sin_arm_n)
@@ -500,11 +522,23 @@ cdef class MultiAnalyzer:
 
         return tth
 
+
     def refine(self, int idr, int ida, 
-               double arm, double resolution=1e-8, int niter=250, 
-               double phi_max=90):
+               float64_t arm, float64_t resolution=1e-8, int niter=250, 
+               float64_t phi_max=90):
         """Refine the diffraction angle for an arm position any analyzer and any ROI"""
         return self._refine(idr, ida, arm*self.dr, resolution*self.dr, niter, sin(phi_max*self.dr))/self.dr
+    
+    def set_shape(self, columnorder, nframes, num_col, num_row, **kw):
+        if columnorder == 0:
+            shape = (nframes, num_col, self.NUM_CRYSTAL, num_row)
+        elif columnorder == 1:
+            shape = (nframes, self.NUM_CRYSTAL, num_col, num_row)
+        elif columnorder == 2:
+            shape = (nframes, self.NUM_CRYSTAL, num_row, num_col)
+        self.shape = shape
+        return shape
+
     
     def integrate(self,
                   roicollection, 
@@ -547,15 +581,12 @@ cdef class MultiAnalyzer:
         cdef:
             int nbin, idx_row, frame, ida, idr, value, idx, idx_col, nframes = arm.shape[0]
             float64_t[:, ::1] norm_b
+            float64_t a, tth, nrm, sin_phi_max
             int32_t[:, :, ::1] signal_b
-            double a, tth, nrm
             int32_t[:, :, :, ::1] roicoll
-        if columnorder == 0:
-            roicoll = numpy.ascontiguousarray(roicollection, dtype=numpy.int32).reshape((nframes, num_col, self.NUM_CRYSTAL, num_row))
-        elif columnorder == 1:
-            roicoll = numpy.ascontiguousarray(roicollection, dtype=numpy.int32).reshape((nframes, self.NUM_CRYSTAL, num_col, num_row))
-        elif columnorder == 2:
-            roicoll = numpy.ascontiguousarray(roicollection, dtype=numpy.int32).reshape((nframes, self.NUM_CRYSTAL, num_row, num_col))
+
+        self.set_shape(columnorder, nframes, num_col, num_row)
+        roicoll = numpy.ascontiguousarray(roicollection, dtype=numpy.int32).reshape(self.shape)
         
         if dtthw:
             logger.warning("Width/dtthw parameters are not supported in Cython implementation")
@@ -563,9 +594,10 @@ cdef class MultiAnalyzer:
         tth_b = numpy.arange(tth_min, tth_max + (0.5-numpy.finfo("float64").eps) * dtth, dtth)
         tth_min -= 0.5 * dtth
         nbin = tth_b.size
+        
         norm_b = numpy.zeros((self.NUM_CRYSTAL, nbin), dtype=numpy.float64)
         signal_b = numpy.zeros((self.NUM_CRYSTAL, nbin, num_col), dtype=numpy.int32)
-        assert mon.shape[0] == arm.shape[0], "monitor array shape matches the one from arm array "        
+        assert mon.shape[0] == arm.shape[0], "`monitor` array size matches the one from `arm` array "        
                
         roi_min, roi_max = min(roi_min, roi_max), max(roi_min, roi_max)
         roi_min = max(roi_min, 0)
@@ -576,7 +608,7 @@ cdef class MultiAnalyzer:
         
         if self.do_debug:
             self.cycles = numpy.zeros((self.NUM_CRYSTAL, num_row, nframes), dtype=numpy.uint8)
-        
+        sin_phi_max = sin(phi_max*self.dr)
         #switch to radians:
         tth_min *= self.dr
         tth_max *= self.dr
@@ -590,7 +622,7 @@ cdef class MultiAnalyzer:
                     idx_row = roi_min - roi_step
                     for idr in range(num_row):
                         idx_row = idx_row + roi_step
-                        tth = self._refine(idx_row, ida, a, resolution, iter_max, phi_max, frame)
+                        tth = self._refine(idx_row, ida, a, resolution, iter_max, sin_phi_max, frame)
                         if (tth>=tth_min) and (tth<tth_max):
                             idx = <int>floor((tth - tth_min)/dtth)
                             norm_b[ida, idx] = norm_b[ida, idx] + nrm
@@ -601,20 +633,142 @@ cdef class MultiAnalyzer:
                                     value = roicoll[frame, ida, idx_col, idx_row]
                                 elif columnorder == 2:
                                     value = roicoll[frame, ida, idx_row, idx_col]
-                                if value<65530:
-                                    signal_b[ida, idx, idx_col] = signal_b[ida, idx, idx_col] + value
+                                signal_b[ida, idx, idx_col] = signal_b[ida, idx, idx_col] + value
         if self.do_debug:
             return numpy.asarray(tth_b), numpy.asarray(signal_b), numpy.asarray(norm_b), numpy.asarray(self.cycles)
         else:
             return numpy.asarray(tth_b), numpy.asarray(signal_b), numpy.asarray(norm_b)
 
-#----------------------------------------------- 
+#-----------------------------------------------
 #    Multi pass implementation
 #-----------------------------------------------
-    def init_integrate(self):
-        pass
-    def partial_integate(self):
-        pass
+    def init_integrate(self,
+                  max_frames,
+                  arm,
+                  mon,
+                  tth_min,
+                  tth_max,
+                  dtth,
+                  num_row=512,
+                  num_col=31,
+                  columnorder=0,  # // 0: (column=31, channel=13, row=512), 1: (channel=13, column=31, row=512), 2: (channel=13, row=512, column=31)
+                  phi_max=90.,
+                  roi_min=0,
+                  roi_max=512,
+                  roi_step=1,
+                  iter_max=250,
+                  resolution=1e-3,
+                  width=1,
+                  dtthw=None
+                  ):
+        """Initializes the integrator for the rebinning of several small chunks of data.
+        
+        :param max_frames: number of frames (max) per block
+        :param arm: 2theta position of the arm (in degrees)
+        :param tth_min: start position of the histograms (in degrees)
+        :param tth_max: End positon of the histogram (in degrees)
+        :param dtth: bin size for the histogram (in degrees)
+        :param phi_max: discard data with |phi| larger than this value (in degree)
+        :param iter_max: maximum number of iteration in the 2theta convergence
+        :param resolution: precision of the 2theta convergence in fraction of dtth
+        :param width: width of the sample, same unit as pixels
+        :param dtthw: Minimum precision expected for ROI being `width` appart, by default dtth
+        :return: nothing.
+        """
+        shape = self.set_shape(columnorder, max_frames, num_col, num_row)
+        if dtthw:
+            logger.warning("Width/dtthw parameters are not supported in Cython implementation")
+        tth_max += 0.5 * dtth
+        self.out_tth = numpy.arange(tth_min, tth_max + (0.5-numpy.finfo("float64").eps) * dtth, dtth)
+        tth_min -= 0.5 * dtth
+        nbin = self.out_tth.size
+        self.arm = arm
+        self.mon = mon
+        self.out_norm = numpy.zeros((self.NUM_CRYSTAL, nbin), dtype=numpy.float64)
+        self.out_signal = numpy.zeros((self.NUM_CRYSTAL, nbin, num_col), dtype=numpy.int32)
+        self.scalars["num_row"] = num_row
+        self.scalars["num_col"] = num_col
+        self.scalars["num_frame"] = max_frames
+        self.scalars["nbin"] = nbin
+        self.scalars["columnorder"]=columnorder
+        self.scalars["phi_max"]=phi_max
+        self.scalars["roi_min"]=roi_min
+        self.scalars["roi_step"]=roi_step
+        self.scalars["iter_max"]=iter_max
+        #switch to radians:
+        self.scalars["tth_max"] = tth_max*self.dr
+        self.scalars["tth_min"] = tth_min*self.dr
+        self.scalars["dtth"]= dtth*self.dr
+        self.scalars["resolution"]=resolution*self.dr
+        self.scalars["sin_phi_max"] = sin(phi_max*self.dr)
+
+    def partial_integate(self, roicol_description, roicol_data):
+        cdef:
+            int32_t[:, :, :, ::1] roicol
+            float64_t[::1] arm 
+            float64_t[::1] mon 
+            int start, stop, num_row, num_col, columnorder, roi_min, roi_max, roi_step, iter_max, idr, idx_row, idx, ida, nbin, value, num_frame, frame, idx_col
+            float64_t phi_max, resolution, tth_min, tth_max, dtth
+            float64_t a, tth, nrm, sin_phi_max
+
+        start = roicol_description.start
+        stop = roicol_description.stop
+        num_frame = stop - start
+        num_row = self.scalars["num_row"]
+        num_col = self.scalars["num_col"]
+        max_frames = self.scalars["num_frame"]
+        nbin = self.scalars["nbin"]
+        tth_max = self.scalars["tth_max"]
+        tth_min = self.scalars["tth_min"]
+        dtth = self.scalars["dtth"]
+        columnorder = self.scalars["columnorder"]
+        phi_max = self.scalars["phi_max"]
+        roi_min  = self.scalars["roi_min"]
+        roi_step  = self.scalars["roi_step"]
+        resolution  = self.scalars["resolution"]
+        iter_max = self.scalars["iter_max"]
+        sin_phi_max = self.scalars["sin_phi_max"]
+        roicol = numpy.ascontiguousarray(roicol_data, numpy.int32).reshape((-1,) + self.shape[1:])
+        arm = self.arm[start: stop]
+        mon = self.mon[start: stop]
+        assert self.out_signal.shape[0] == self.NUM_CRYSTAL, "self.out_signal.shape[0] == self.NUM_CRYSTAL" 
+        assert self.out_norm.shape[0] == self.NUM_CRYSTAL, "self.out_norm.shape[0] == self.NUM_CRYSTAL"
+        assert self.out_signal.shape[1] == nbin, "self.out_signal.shape[1] == nbin" 
+        assert self.out_norm.shape[1] == nbin, "self.out_norm.shape[1] == nbin"
+        assert self.out_signal.shape[2] == num_col, "self.out_signal.shape[2] == num_col"        
+        logger.debug("Process frames %i to %i out of %i", start, stop, len(self.arm))
+        with nogil:
+            for ida in prange(self.NUM_CRYSTAL, schedule="dynamic"):
+        # for ida in range(self.NUM_CRYSTAL):
+                for frame in range(num_frame):
+                    a = arm[frame]*self.dr
+                    nrm = mon[frame]
+                    idx_row = roi_min - roi_step
+                    for idr in range(num_row):
+                        idx_row = idx_row + roi_step
+                        tth = self._refine(idx_row, ida, a, resolution, iter_max, sin_phi_max, frame)
+                        if (tth>=tth_min) and (tth<tth_max):
+                            idx = <int>floor((tth - tth_min)/dtth)
+                            self.out_norm[ida, idx] = self.out_norm[ida, idx] + nrm
+                            for idx_col in range(num_col):
+                                if columnorder == 0:
+                                    value = roicol[frame, idx_col, ida, idx_row]
+                                elif columnorder == 1:
+                                    value = roicol[frame, ida, idx_col, idx_row]
+                                elif columnorder == 2:
+                                    value = roicol[frame, ida, idx_row, idx_col]
+                                if 0<=value<65530:
+                                    self.out_signal[ida, idx, idx_col] = self.out_signal[ida, idx, idx_col] + value
+
+    def finish_integrate(self):
+        return numpy.asarray(self.out_tth), numpy.asarray(self.out_signal), numpy.asarray(self.out_norm)
+
     def reset(self):
         "reset the integrator and zeros out all arrays"
-        pass
+        self.out_tth = None
+        self.arm = None
+        self.mon = None
+        self.shape = None
+        self.out_norm = None
+        self.out_signal = None
+        self.scalars = {}

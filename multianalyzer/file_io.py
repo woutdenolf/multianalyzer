@@ -1,6 +1,7 @@
 __authors__ = ["Jérôme Kieffer"]
 __license__ = "MIT"
 __date__ = "18/10/2022"
+__copyright__ = "2021-2022, ESRF, France"
 
 import os
 import posixpath
@@ -572,7 +573,6 @@ def save_rebin(filename, beamline="id22", name="id22rebin", topas=None, res=None
             scale = numpy.atleast_2d(numpy.median(norm, axis=-1)).T
             if I_sum.ndim > norm.ndim:
                 I_sum = I_sum.sum(axis=-1)
-            print(f"scale: {scale.shape}, I_sum: {I_sum.shape}, norm {norm.shape}")
             with numpy.errstate(divide='ignore', invalid='ignore'):
                 I = scale * I_sum / norm
             Ima_ds = data_grp.create_dataset("I_MA", data=I , **CMP)

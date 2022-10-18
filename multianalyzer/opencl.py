@@ -1,3 +1,10 @@
+
+__author__ = "Jérôme KIEFFER"
+__date__  = "18/10/2022"
+__copyright__ = "2021-2022, ESRF, France"
+__licence__ = "MIT"
+
+
 import os
 import logging
 logger = logging.getLogger(__name__)
@@ -98,7 +105,7 @@ class OclMultiAnalyzer:
                                                           ("rolly", self.buffers["rolly"].data),
                                                           ("resolution", None),
                                                           ("niter", 250),
-                                                          ("phi_max", None),
+                                                          ("sin_phi_max", None),
                                                           ("roi_min", None),
                                                           ("roi_max", None),
                                                           ("tth_min", None),
@@ -224,7 +231,7 @@ class OclMultiAnalyzer:
         kwags["num_bin"] = numpy.uint32(nbin)
         kwags["resolution"] = numpy.deg2rad(resolution * dtth)
         kwags["niter"] = numpy.int32(iter_max)
-        kwags["phi_max"] = numpy.deg2rad(phi_max)
+        kwags["sin_phi_max"] = numpy.sin(numpy.deg2rad(phi_max))
         kwags["tth_min"] = numpy.deg2rad(tth_min)
         kwags['tth_max'] = numpy.deg2rad(tth_max)
         kwags["dtth"] = numpy.deg2rad(dtth)
@@ -362,7 +369,7 @@ class OclMultiAnalyzer:
         kwags["num_bin"] = numpy.uint32(nbin)
         kwags["resolution"] = numpy.deg2rad(resolution * dtth)
         kwags["niter"] = numpy.int32(iter_max)
-        kwags["phi_max"] = numpy.deg2rad(phi_max)
+        kwags["sin_phi_max"] = numpy.sin(numpy.deg2rad(phi_max))
         kwags["tth_min"] = numpy.deg2rad(tth_min)
         kwags['tth_max'] = numpy.deg2rad(tth_max)
         kwags["dtth"] = numpy.deg2rad(dtth)
@@ -396,9 +403,9 @@ class OclMultiAnalyzer:
             sub_mon = numpy.empty((max_frames), dtype=numpy.int32)
             sub_mon[:stop - start] = self.mon[start:stop]
 
-        self.buffers["roicoll"].set(sub_roicol)
-        self.buffers["monitor"].set(sub_mon)
-        self.buffers["arm"].set(sub_arm)
+        self.buffers["roicoll"].set(sub_roicol, async_=True)
+        self.buffers["monitor"].set(sub_mon, async_=True)
+        self.buffers["arm"].set(sub_arm, async_=True)
 
         kwags["num_frame"] = numpy.uint32(stop - start)
         num_row = int(kwags["num_row"])
@@ -406,7 +413,13 @@ class OclMultiAnalyzer:
         # for k, v in kwags.items():
         #     print(k, v)
         evt = self.prg.integrate(self.queue, (num_row, stop - start, self.NUM_CRYSTAL), (num_row, 1, 1), *kwags.values())
+        self.buffers["roicoll"].finish()
+        self.buffers["monitor"].finish()
+        self.buffers["arm"].finish()
         evt.wait()
+        del sub_roicol
+        del sub_mon
+        del sub_arm
 
     def finish_integrate(self):
         return self.tth_b, self.buffers["out_signal"].get(), self.buffers["out_norm"].get()

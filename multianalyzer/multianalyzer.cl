@@ -230,7 +230,7 @@ kernel void  integrate(
         global double *rolly,
         double resolution, 
         int32_t niter, 
-        double phi_max,
+        double sin_phi_max,
         uint32_t roi_min,
         uint32_t roi_max,
         double tth_min,
@@ -258,7 +258,7 @@ kernel void  integrate(
     uint8_t active_thread = ((idr<num_row) || (idf<num_frame) || (ida<num_crystal) );
     if (active_thread){    
         if ((idr>=roi_min) && (idr<roi_max)){   
-            double2 tth2 = refine_tth(L, L2, pixel, d_arm, center, tha, thd, psi, rollx, rolly, resolution, niter, phi_max);
+            double2 tth2 = refine_tth(L, L2, pixel, d_arm, center, tha, thd, psi, rollx, rolly, resolution, niter, sin_phi_max);
             tth = tth2.s0;
             c = (int32_t)tth2.s1;
         }
