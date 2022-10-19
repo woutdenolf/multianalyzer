@@ -2,3 +2,5 @@ numpy
 setuptools<60
 pyopencl
 cython
+h5py
+hdf5plugin
