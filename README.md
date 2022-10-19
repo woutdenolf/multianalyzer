@@ -1,3 +1,5 @@
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.7223895.svg)](https://doi.org/10.5281/zenodo.7223895)
+
 # Multianalyzer
 Rebinning of powder diffraction data taken with multiple analyzer crystals and a large area detector
 
