@@ -3,9 +3,6 @@ __license__ = "MIT"
 __date__ = "08/10/2021"
 
 import os as _os
-import logging as _logging
-
-_logging.getLogger(__name__).addHandler(_logging.NullHandler())
 
 project = _os.path.basename(_os.path.dirname(_os.path.abspath(__file__)))
 
