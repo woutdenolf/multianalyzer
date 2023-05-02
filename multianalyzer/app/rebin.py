@@ -39,13 +39,8 @@ import os
 from argparse import ArgumentParser
 from contextlib import contextmanager
 import logging
-import time
-try:
-    logging.basicConfig(level=logging.WARNING, force=True)
-except ValueError:
-    logging.basicConfig(level=logging.WARNING)
-logging.captureWarnings(True)
 logger = logging.getLogger(__name__)
+
 import numpy
 try:
     import hdf5plugin  # noqa
@@ -289,4 +284,9 @@ def main():
 
 
 if __name__ == "__main__":
+    try:
+        logging.basicConfig(level=logging.WARNING, force=True)
+    except ValueError:
+        logging.basicConfig(level=logging.WARNING)
+    logging.captureWarnings(True)
     main()
