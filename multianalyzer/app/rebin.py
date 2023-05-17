@@ -36,6 +36,7 @@ __date__ = "20/05/2022"
 __status__ = "development"
 
 import os
+import time
 from argparse import ArgumentParser
 from contextlib import contextmanager
 import logging
