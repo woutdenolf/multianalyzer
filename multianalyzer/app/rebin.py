@@ -228,12 +228,11 @@ def rebin_result_generator(filename=None, entries=None, hdf5_data=None, output=N
             print(f"Save to {output}::{entry}")
             with timer.timeit_write():
                 save_rebin(output, beamline="id22", name="id22rebin", topas=param, res=res, start_time=timer.start_time, entry=entry)
-        yield res
+        yield entry, res
 
 
 def rebin_file(**kwargs):
-    for _ in rebin_result_generator(**kwargs):
-        pass
+    return [entry for entry,_ in rebin_result_generator(**kwargs)]
 
 
 class Timer():
